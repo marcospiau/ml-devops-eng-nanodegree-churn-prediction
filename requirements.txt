@@ -1,0 +1,9 @@
+scikit-learn
+numpy
+seaborn
+matplotlib
+pylint
+yapf
+autopep8
+notebook
+shap
