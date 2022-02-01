@@ -6,12 +6,15 @@ import shutil
 from pathlib import Path
 from typing import List, Tuple
 
+import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import RocCurveDisplay, classification_report
+from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.preprocessing import minmax_scale
 
 logging.basicConfig(
@@ -35,10 +38,14 @@ def import_data(path: str) -> pd.DataFrame:
     """
     try:
         df = pd.read_csv(path)
+        assert not(df.empty)
         logging.info('SUCCESS: Loaded csv from %s', path)
         return df
     except FileNotFoundError as err:
         logging.error(err)
+        raise
+    except AssertionError as err:
+        logging.error('Data appears to be empty')
         raise
 
 
@@ -63,12 +70,12 @@ def perform_eda(df: pd.DataFrame,
         (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     # # Target column
-    # df[response].value_counts(dropna=False).plot.bar(grid=True)
-    # plt.title(f'{response} distribution')
-    # plt.xlabel('Value')
-    # plt.ylabel('Counts')
-    # plt.tight_layout()
-    # plt.savefig(output_dir / 'target' / 'target_distribution.png')
+    df[response].value_counts(dropna=False).plot.bar(grid=True)
+    plt.title(f'{response} distribution')
+    plt.xlabel('Value')
+    plt.ylabel('Counts')
+    plt.tight_layout()
+    plt.savefig(output_dir / 'target' / 'target_distribution.png')
 
     # # Categorical features - univariate
     for col in cat_columns:
@@ -80,6 +87,7 @@ def perform_eda(df: pd.DataFrame,
         plt.savefig(output_dir / 'categorical_features' /
                     f'univariate_distribution_{col}.png')
         plt.clf()
+        plt.close()
 
     # Categorical features - mean response
     for col in cat_columns:
@@ -91,6 +99,7 @@ def perform_eda(df: pd.DataFrame,
         plt.savefig(output_dir / 'categorical_features' /
                     f'mean_response_{col}.png')
         plt.clf()
+        plt.close()
 
     # Quantitative features - histogram by target value
     for col in quant_columns:
@@ -108,6 +117,7 @@ def perform_eda(df: pd.DataFrame,
         plt.savefig(output_dir / 'quantitative_features' /
                     f'histogram_by_target_{col}.png')
         plt.clf()
+        plt.close()
 
     # Quantitative features - univariate histogram
     for col in quant_columns:
@@ -122,8 +132,21 @@ def perform_eda(df: pd.DataFrame,
         plt.title(f'Univariate histogram {col}')
         plt.tight_layout()
         plt.savefig(output_dir / 'quantitative_features' /
-                    f'univariate_histogram{col}.png')
+                    f'univariate_histogram_{col}.png')
         plt.clf()
+        plt.close()
+
+    # Quantitative columns - correlation
+    plt.figure(figsize=(20, 10))
+    sns.heatmap(df[quant_columns + [response]].corr().round(2),
+                annot=True,
+                linewidths=2)
+    plt.title(f'Correlation matrix quantitative columns')
+    plt.tight_layout()
+    plt.savefig(output_dir / 'quantitative_features' /
+                f'correlation_matrix_quant_columns.png')
+    plt.clf()
+    plt.close()
 
 
 def encoder_helper(df: pd.DataFrame,
@@ -146,9 +169,14 @@ def encoder_helper(df: pd.DataFrame,
     out = []
     for col in category_lst:
         out.append(
-            df.groupby(col)[response].transform('mean').to_frame(
-                f'{col}_{response}'))
-    out = pd.concat(out, axis=1)
+            df
+            .groupby(col)
+            [response]
+            .transform('mean')
+            .to_frame(f'{col}_mean_{response}')
+            .copy()
+        )
+    out = pd.concat(out, axis=1).astype(np.float32)
     return out
 
 
@@ -193,56 +221,152 @@ def perform_feature_engineering(
     logging.info('Finishing feature engineering')
     return X_train, X_test, y_train, y_test
 
-
-def classification_report_image(y_train, y_test, y_train_preds_lr,
-                                y_train_preds_rf, y_test_preds_lr,
-                                y_test_preds_rf):
-    '''
-    produces classification report for training and testing results and stores report as image
-    in images folder
-    input:
-            y_train: training response values
-            y_test:  test response values
-            y_train_preds_lr: training predictions from logistic regression
-            y_train_preds_rf: training predictions from random forest
-            y_test_preds_lr: test predictions from logistic regression
-            y_test_preds_rf: test predictions from random forest
-
-    output:
-             None
-    '''
-    raise NotImplementedError
-
-
-def feature_importance_plot(model, X_data, output_pth):
-    '''
-    creates and stores the feature importances in pth
-    input:
-            model: model object containing feature_importances_
-            X_data: pandas dataframe of X values
-            output_pth: path to store the figure
-
-    output:
-             None
-    '''
-    raise NotImplementedError
+def classification_report_image(
+    labels_trues_preds: Dict[str, List[np.array, np.array]],
+    output_file: str,
+    **classification_report_kwargs) -> None:
+    """Run classification reports for multiple pairs of y_true and y_pred and
+        store as as image.
+    """
+    # Calculate classification report for each prediction
+    results = {
+        label: classification_report(
+            y_true=y_true,
+            y_pred=y_pred,
+        )
+        for label, (y_true, y_pred) in labels_and_preds.items()
+    }
+    all_results = {f'{label}\n\n {result}' for label, result in results.items()}
+    plt.figure(figsize=(5, 5))
+    plt.text(all_results)
+    plt.tight_layout()
+    plt.savefig(output_file)
+    plt.clf()
+    plt.close()
 
 
-def train_models(X_train, X_test, y_train, y_test):
-    '''
-    train, store model results: images + scores, and store models
-    input:
-              X_train: X training data
-              X_test: X testing data
-              y_train: y training data
-              y_test: y testing data
-    output:
-              None
-    '''
-    raise NotImplementedError
+def feature_importance_plot(feature_names: np.ndarray,
+                            feature_importances: np.ndarray,
+                            output_pth: str) -> None:
+    """Save feature importances plot.
+
+    Args:
+        feature_names (np.ndarray): array of strings with feature names.
+        feature_importances (np.ndarray): array containing feature importances.
+        output_pth (str): where to save the plot.
+    """
+    df = pd.DataFrame()
+    df['feature_names'] = feature_names.copy()
+    df['feature_importances'] = feature_importances.ravel().copy()
+    # Biggest absolute values on top
+    df = df.iloc[df['feature_importances'].abs().argsort()[::-1]]
+    plt.figure(figsize=(10, 10))
+    sns.barplot(data=df, x='feature_importances', y='feature_names')
+    plt.tight_layout()
+    plt.savefig(output_pth)
+    plt.clf()
+    plt.close()
 
 
-if __name__ == '__main__':
+def train_models(X_train: pd.DataFrame,
+                 X_test: pd.DataFrame,
+                 y_train: pd.Series,
+                 y_test: pd.Series,
+                 models_dir='./models',
+                 results_dir='./results') -> None:
+    """train, store model results: images + scores, and store models
+
+    Args:
+        X_train (pd.DataFrame): X training data
+        X_test (pd.DataFrame): X testing data
+        y_train (pd.Series): y training data
+        y_test (pd.Series): y testing data
+        models_dir (str, optional): Where to save model artifacts.
+            Defaults to './models'.
+        results_dir (str, optional): Where to save feature importances and
+            results plot. Defaults to './results'.
+    """
+
+    lrc = LogisticRegression(random_state=42, n_jobs=-1)
+    logging.info('Starting logistic Regression Classifier fitting')
+    lrc.fit(X_train, y_train)
+
+    logging.info('Finished logistic Regression Classifier fitting')
+
+    # grid search
+    logging.info('Starting random Forest Grid Search')
+    rfc = RandomForestClassifier(random_state=42, n_jobs=-1)
+    rfc_param_grid = {
+        'n_estimators': [200, 500],
+        'max_features': ['auto', 'sqrt'],
+        'max_depth': [4, 5, 100],
+        'criterion': ['gini', 'entropy']
+    }
+    cv_rfc = RandomizedSearchCV(estimator=rfc,
+                                param_distributions=rfc_param_grid,
+                                cv=5,
+                                verbose=10,
+                                n_iter=2)
+    cv_rfc.fit(X_train, y_train)
+    logging.info('Finished Random Forest Grid Search')
+
+    # save models
+    models_dir = Path(models_dir)
+    models_dir.mkdir(parents=True, exist_ok=True)
+    joblib.dump(cv_rfc.best_estimator_, models_dir / 'rfc_model.pkl')
+    joblib.dump(lrc, models_dir / 'logistic_model.pkl')
+
+    # feature importances plots
+    results_dir = Path(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    feature_importance_plot(feature_names=lrc.feature_names_in_,
+                            feature_importances=lrc.coef_,
+                            output_pth=results_dir /
+                            'logistic_model_coefs.png')
+    feature_importance_plot(
+        feature_names=cv_rfc.best_estimator_.feature_names_in_,
+        feature_importances=cv_rfc.best_estimator_.feature_importances_,
+        output_pth=results_dir / 'rfc_model_feature_importances.png')
+
+    # Data used for metrics evaluation
+    preds_and_trues = {}
+    preds_and_trues['lrc_train'] = [lrc.predict_proba(X_train), y_train]
+    preds_and_trues['lrc_test'] = [lrc.predict_proba(X_test), y_test]
+    preds_and_trues['rfc_train'] = [cv_rfc.best_estimator_.predict_proba(X_train), y_train]
+    preds_and_trues['rfc_test'] = [cv_rfc.best_estimator_.predict_proba(X_test), y_test]
+
+
+    # FIXME: arrumar roc curves
+    # TODO: ver como plotar diversos no mesmo axis
+    # roc curves
+    # for part, X, y in [('train', X_train, y_train), ('test', X_test, y_test)]:
+    plt.axis()
+    for label, y_true, y_preds in preds_and_trues.items():
+        auc_plot = RocCurveDisplay.from_predictions(lrc, X, y)
+        auc_plot = RocCurveDisplay.from_estimator(cv_rfc.best_estimator_,
+                                                  X,
+                                                  y,
+                                                  ax=auc_plot.ax_)
+        plt.title(f'AUC curves {part}')
+        plt.savefig(results_dir / f'auc_{part}.png')
+        plt.clf()
+        plt.close()
+    
+    # TODO: arrumar chamada da classification report
+    # classification reports
+    classification_report_image(
+        labels_trues_preds={
+            'Logistic Regression (train)',
+        },
+        output_file=results_dir / 'classification_report_image.png'
+        **classification_report_kwargs)    
+    classification_report_image(
+        y_true=
+
+    )
+
+
+def main():
     logging.info('Starting script')
     df = import_data('./data/bank_data.csv')
     df['Churn'] = np.where(df['Attrition_Flag'].eq('Attrited Customer'), 1, 0)
@@ -268,6 +392,9 @@ if __name__ == '__main__':
 
     # TODO: maybe remove this rmtree
     shutil.rmtree('./images')
+    shutil.rmtree('./models')
+    shutil.rmtree('./results')
+
     perform_eda(df=df,
                 cat_columns=cat_columns,
                 quant_columns=quant_columns,
@@ -281,7 +408,13 @@ if __name__ == '__main__':
         quant_columns=quant_columns,
         response='Churn')
 
-    lrc = LogisticRegression(random_state=42, n_jobs=-1)
+    # Model fitting
+    train_models(X_train=X_train,
+                 X_test=X_test,
+                 y_train=y_train,
+                 y_test=y_test,
+                 models_dir='./models',
+                 results_dir='./results')
 
-    logging.info('Fitting logistic Regression Classifier')
-    lrc.fit(X_train, y_train)
+if __name__ == '__main__':
+    main()

@@ -1,9 +1,11 @@
+"""Tests for churn_library."""
 import os
 import logging
-import churn_library_solution as cls
+# import churn_library_solution as 
+import churn_library as cls
 
 logging.basicConfig(
-    filename='./logs/churn_library.log',
+    # filename='./logs/churn_library.log',
     level = logging.INFO,
     filemode='w',
     format='%(name)s - %(levelname)s - %(message)s')
@@ -52,12 +54,4 @@ def test_train_models(train_models):
 
 
 if __name__ == "__main__":
-	pass
-
-
-
-
-
-
-
-
+	test_import(cls.import_data)
