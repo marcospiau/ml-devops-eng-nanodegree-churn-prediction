@@ -4,13 +4,14 @@
 import logging
 import shutil
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import tabulate
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import RocCurveDisplay, classification_report
@@ -35,10 +36,14 @@ def import_data(path: str) -> pd.DataFrame:
 
     Returns:
         pd.DataFrame: pandas dataframe.
+    
+    Raises:
+        FileNotFoundError: if input path doest not exists
+        AssertionError: if load data is empty
     """
     try:
         df = pd.read_csv(path)
-        assert not(df.empty)
+        assert not (df.empty)
         logging.info('SUCCESS: Loaded csv from %s', path)
         return df
     except FileNotFoundError as err:
@@ -60,8 +65,9 @@ def perform_eda(df: pd.DataFrame,
         df (pd.DataFrame): input dataframe
         cat_columns (List[str]): categoric columns
         quant_columns (List[str]): continuous features
-        response (str): target name. Defaults to 'Churn'.
+        response (str): target column name. Defaults to 'Churn'.
         output_dir (str): Output directory. Defaults to ./images/eda.
+
     """
     # Initialize directory Tree
     output_dir = Path(output_dir)
@@ -163,19 +169,15 @@ def encoder_helper(df: pd.DataFrame,
             'Churn'.
 
     Returns:
-        pd.DataFrame: encoded categorical columns.
+        pd.DataFrame: pd.pd.DataFrame with encoded categorical columns, with
+        same index from input.
     """
 
     out = []
     for col in category_lst:
         out.append(
-            df
-            .groupby(col)
-            [response]
-            .transform('mean')
-            .to_frame(f'{col}_mean_{response}')
-            .copy()
-        )
+            df.groupby(col)[response].transform('mean').to_frame(
+                f'{col}_mean_{response}').copy())
     out = pd.concat(out, axis=1).astype(np.float32)
     return out
 
@@ -193,9 +195,6 @@ def perform_feature_engineering(
         cat_columns (List[str]): columns to be treated as categorical
         quant_columns (List[str]): continouous columns
         response (str, optional): Target column name. Defaults to 'Churn'.
-
-    Raises:
-        NotImplementedError: [description]
 
     Returns:
         Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
@@ -221,25 +220,40 @@ def perform_feature_engineering(
     logging.info('Finishing feature engineering')
     return X_train, X_test, y_train, y_test
 
-def classification_report_image(
-    labels_trues_preds: Dict[str, List[np.array, np.array]],
-    output_file: str,
-    **classification_report_kwargs) -> None:
+
+def classification_report_image(labels_trues_preds: Dict[str, Tuple[np.array,
+                                                                    np.array]],
+                                output_file: str,
+                                figsize=(7, 10),
+                                **classification_report_kwargs) -> None:
     """Run classification reports for multiple pairs of y_true and y_pred and
         store as as image.
+
+
+    Args:
+        labels_trues_preds (Dict[str, Tuple[np.array, np.array]]): Dict mapping
+            a string identifier to a tuple of arrays containing true and
+            predicted target values.
+        output_file (str): where to save predictions.
+        figsize (tuple, optional): Figure size follows matplotlib format
+            (width, height in inches). Defaults to (7, 10).
+        **classification_report_kwargs: optional arguments passed to
+            sklearn.metrics.classification_report function.
+
     """
     # Calculate classification report for each prediction
     results = {
-        label: classification_report(
-            y_true=y_true,
-            y_pred=y_pred,
-        )
-        for label, (y_true, y_pred) in labels_and_preds.items()
+        label: classification_report(y_true=y_true,
+                                     y_pred=(y_pred >= 0.5).astype(int),
+                                     **classification_report_kwargs)
+        for label, (y_true, y_pred) in labels_trues_preds.items()
     }
-    all_results = {f'{label}\n\n {result}' for label, result in results.items()}
-    plt.figure(figsize=(5, 5))
-    plt.text(all_results)
-    plt.tight_layout()
+    filler = 60 * '*'
+    all_results = '\n'.join(f"{filler}\n{label}\n{filler}\n{result}"
+                            for label, result in results.items())
+    plt.figure(figsize=figsize)
+    plt.text(0, 0, all_results, {'fontsize': 10}, fontproperties='monospace')
+    plt.axis('off')
     plt.savefig(output_file)
     plt.clf()
     plt.close()
@@ -302,11 +316,12 @@ def train_models(X_train: pd.DataFrame,
         'max_depth': [4, 5, 100],
         'criterion': ['gini', 'entropy']
     }
-    cv_rfc = RandomizedSearchCV(estimator=rfc,
-                                param_distributions=rfc_param_grid,
-                                cv=5,
-                                verbose=10,
-                                n_iter=2)
+    cv_rfc = RandomizedSearchCV(
+        estimator=rfc,
+        param_distributions=rfc_param_grid,
+        cv=5,
+        # verbose=10,
+        n_iter=2)
     cv_rfc.fit(X_train, y_train)
     logging.info('Finished Random Forest Grid Search')
 
@@ -317,53 +332,48 @@ def train_models(X_train: pd.DataFrame,
     joblib.dump(lrc, models_dir / 'logistic_model.pkl')
 
     # feature importances plots
+    logging.info('Creating feature importance plots')
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
-    feature_importance_plot(feature_names=lrc.feature_names_in_,
-                            feature_importances=lrc.coef_,
-                            output_pth=results_dir /
-                            'logistic_model_coefs.png')
+    feature_importance_plot(
+        feature_names=np.r_[['Intercept'], lrc.feature_names_in_],
+        feature_importances=np.r_[lrc.intercept_,
+                                  lrc.coef_.ravel()],
+        output_pth=results_dir / 'logistic_model_coefs.png')
     feature_importance_plot(
         feature_names=cv_rfc.best_estimator_.feature_names_in_,
         feature_importances=cv_rfc.best_estimator_.feature_importances_,
         output_pth=results_dir / 'rfc_model_feature_importances.png')
 
     # Data used for metrics evaluation
+    logging.info('Predicting scores for train and test')
     preds_and_trues = {}
-    preds_and_trues['lrc_train'] = [lrc.predict_proba(X_train), y_train]
-    preds_and_trues['lrc_test'] = [lrc.predict_proba(X_test), y_test]
-    preds_and_trues['rfc_train'] = [cv_rfc.best_estimator_.predict_proba(X_train), y_train]
-    preds_and_trues['rfc_test'] = [cv_rfc.best_estimator_.predict_proba(X_test), y_test]
+    preds_and_trues['Logistic Regression - train'] = (
+        y_train, lrc.predict_proba(X_train)[:, 1])
+    preds_and_trues['Logistic Regression - test'] = (
+        y_test, lrc.predict_proba(X_test)[:, 1])
+    preds_and_trues['Random Forest - train'] = (
+        y_train, cv_rfc.best_estimator_.predict_proba(X_train)[:, 1])
+    preds_and_trues['Random Forest - test'] = (
+        y_test, cv_rfc.best_estimator_.predict_proba(X_test)[:, 1])
 
+    logging.info('Creating AUC plots')
+    _, ax = plt.subplots()
+    for label, (y_true, y_preds) in preds_and_trues.items():
+        RocCurveDisplay.from_predictions(y_true=y_true,
+                                         y_pred=y_preds,
+                                         name=label,
+                                         ax=ax)
+    plt.savefig(results_dir / f'auc_roc_curves.png')
+    plt.clf()
+    plt.close()
+    del ax
 
-    # FIXME: arrumar roc curves
-    # TODO: ver como plotar diversos no mesmo axis
-    # roc curves
-    # for part, X, y in [('train', X_train, y_train), ('test', X_test, y_test)]:
-    plt.axis()
-    for label, y_true, y_preds in preds_and_trues.items():
-        auc_plot = RocCurveDisplay.from_predictions(lrc, X, y)
-        auc_plot = RocCurveDisplay.from_estimator(cv_rfc.best_estimator_,
-                                                  X,
-                                                  y,
-                                                  ax=auc_plot.ax_)
-        plt.title(f'AUC curves {part}')
-        plt.savefig(results_dir / f'auc_{part}.png')
-        plt.clf()
-        plt.close()
-    
-    # TODO: arrumar chamada da classification report
-    # classification reports
-    classification_report_image(
-        labels_trues_preds={
-            'Logistic Regression (train)',
-        },
-        output_file=results_dir / 'classification_report_image.png'
-        **classification_report_kwargs)    
-    classification_report_image(
-        y_true=
-
-    )
+    ## classification reports
+    logging.info('Creating classification reports')
+    classification_report_image(labels_trues_preds=preds_and_trues,
+                                output_file=results_dir /
+                                'classification_report_image.png')
 
 
 def main():
@@ -385,15 +395,19 @@ def main():
         'Total_Trans_Ct', 'Total_Ct_Chng_Q4_Q1', 'Avg_Utilization_Ratio'
     ]
 
-    logging.info('Numeric columns (%d) \n%s\n', len(quant_columns),
-                 '\n'.join(quant_columns))
-    logging.info('Categoric columns (%d): \n%s\n', len(cat_columns),
-                 '\n'.join(cat_columns))
+    cols_and_types = [(col, 'cat') for col in cat_columns]
+    cols_and_types += [(col, 'quant') for col in quant_columns]
+
+    logging.info('Features used:\n' +
+                 tabulate.tabulate(cols_and_types,
+                                   headers=['Feature name', 'Feature type'],
+                                   tablefmt='pretty'))
 
     # TODO: maybe remove this rmtree
-    shutil.rmtree('./images')
-    shutil.rmtree('./models')
-    shutil.rmtree('./results')
+    for subdir in ['./images', './models', './results']:
+        if Path(subdir).is_dir():
+            shutil.rmtree(subdir)
+            del subdir
 
     perform_eda(df=df,
                 cat_columns=cat_columns,
@@ -415,6 +429,8 @@ def main():
                  y_test=y_test,
                  models_dir='./models',
                  results_dir='./results')
+    logging.info('PROCESS END')
+
 
 if __name__ == '__main__':
     main()
