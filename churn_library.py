@@ -1,4 +1,8 @@
-"""Code for chur prediction modelling"""
+"""
+Code for churn prediction modelling
+Owner: marcospiau
+Date: February 3, 2022
+"""
 
 # import libraries
 import logging
@@ -18,15 +22,6 @@ from sklearn.metrics import RocCurveDisplay, classification_report
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.preprocessing import minmax_scale
 
-logging.basicConfig(
-    # filename='./test_results.log',
-    level=logging.INFO,
-    filemode='w',
-    # format='%(name)s - %(levelname)s - %(message)s'
-    format=
-    '%(asctime)s %(levelname)s - %(filename)s - %(funcName)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S')
-
 
 def import_data(path: str) -> pd.DataFrame:
     """Read csv data into pandas.
@@ -36,20 +31,20 @@ def import_data(path: str) -> pd.DataFrame:
 
     Returns:
         pd.DataFrame: pandas dataframe.
-    
+
     Raises:
         FileNotFoundError: if input path doest not exists
         AssertionError: if load data is empty
     """
     try:
         df = pd.read_csv(path)
-        assert not (df.empty)
+        assert not df.empty
         logging.info('SUCCESS: Loaded csv from %s', path)
         return df
     except FileNotFoundError as err:
         logging.error(err)
         raise
-    except AssertionError as err:
+    except AssertionError:
         logging.error('Data appears to be empty')
         raise
 
@@ -147,10 +142,10 @@ def perform_eda(df: pd.DataFrame,
     sns.heatmap(df[quant_columns + [response]].corr().round(2),
                 annot=True,
                 linewidths=2)
-    plt.title(f'Correlation matrix quantitative columns')
+    plt.title('Correlation matrix quantitative columns')
     plt.tight_layout()
     plt.savefig(output_dir / 'quantitative_features' /
-                f'correlation_matrix_quant_columns.png')
+                'correlation_matrix_quant_columns.png')
     plt.clf()
     plt.close()
 
@@ -271,7 +266,7 @@ def feature_importance_plot(feature_names: np.ndarray,
     """
     df = pd.DataFrame()
     df['feature_names'] = feature_names.copy()
-    df['feature_importances'] = feature_importances.ravel().copy()
+    df['feature_importances'] = feature_importances.copy()
     # Biggest absolute values on top
     df = df.iloc[df['feature_importances'].abs().argsort()[::-1]]
     plt.figure(figsize=(10, 10))
@@ -364,7 +359,7 @@ def train_models(X_train: pd.DataFrame,
                                          y_pred=y_preds,
                                          name=label,
                                          ax=ax)
-    plt.savefig(results_dir / f'auc_roc_curves.png')
+    plt.savefig(results_dir / 'auc_roc_curves.png')
     plt.clf()
     plt.close()
     del ax
@@ -377,7 +372,19 @@ def train_models(X_train: pd.DataFrame,
 
 
 def main():
+    """Function that encapsulates main process."""
     logging.info('Starting script')
+
+    # Create directory tree
+    logging.info('Creating output directory tree')
+    output_dir = Path('./output_dir')
+    if output_dir.is_dir():
+        logging.info('output_dir %s exists, will overwrite it!', output_dir)
+        shutil.rmtree(output_dir)
+    for subdir in ['./images', './models', './results']:
+        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
+        del subdir
+
     df = import_data('./data/bank_data.csv')
     df['Churn'] = np.where(df['Attrition_Flag'].eq('Attrited Customer'), 1, 0)
 
@@ -398,22 +405,17 @@ def main():
     cols_and_types = [(col, 'cat') for col in cat_columns]
     cols_and_types += [(col, 'quant') for col in quant_columns]
 
-    logging.info('Features used:\n' +
-                 tabulate.tabulate(cols_and_types,
-                                   headers=['Feature name', 'Feature type'],
-                                   tablefmt='pretty'))
-
-    # TODO: maybe remove this rmtree
-    for subdir in ['./images', './models', './results']:
-        if Path(subdir).is_dir():
-            shutil.rmtree(subdir)
-            del subdir
+    logging.info(
+        'Features used:\n%s',
+        tabulate.tabulate(cols_and_types,
+                          headers=['Feature name', 'Feature type'],
+                          tablefmt='pretty'))
 
     perform_eda(df=df,
                 cat_columns=cat_columns,
                 quant_columns=quant_columns,
                 response='Churn',
-                output_dir='./images/eda')
+                output_dir=output_dir / 'images' / 'eda')
 
     # feature engineering
     X_train, X_test, y_train, y_test = perform_feature_engineering(
@@ -427,10 +429,19 @@ def main():
                  X_test=X_test,
                  y_train=y_train,
                  y_test=y_test,
-                 models_dir='./models',
-                 results_dir='./results')
+                 models_dir=output_dir / 'models',
+                 results_dir=output_dir / 'results')
     logging.info('PROCESS END')
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        # filename='./test_results.log',
+        level=logging.INFO,
+        filemode='w',
+        # format='%(name)s - %(levelname)s - %(message)s'
+        format=
+        '%(asctime)s %(levelname)s - %(filename)s - %(funcName)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S')
+
     main()

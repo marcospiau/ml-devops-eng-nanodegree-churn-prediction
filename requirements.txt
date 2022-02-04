@@ -7,3 +7,4 @@ yapf
 autopep8
 notebook
 shap
+PyYAML

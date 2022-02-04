@@ -1,17 +1,25 @@
+"""
+Tests for churn_library.py
+Owner: marcospiau
+Date: February 3, 2022
+"""
+
 import unittest
-from cmath import exp
+import uuid
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import sklearn
 
 from churn_library import (classification_report_image, encoder_helper,
                            feature_importance_plot, import_data, perform_eda,
-                           perform_feature_engineering)
+                           perform_feature_engineering, train_models)
 
 
 class TestImportData(unittest.TestCase):
+    """Tests for data importing"""
     def test_ok_file(self):
         """Test loading of an OK file"""
         df = import_data('./test_data/ok_data.csv')
@@ -25,13 +33,13 @@ class TestImportData(unittest.TestCase):
     def test_inexistent_file_error(self):
         """Test loading of a non existent file"""
         with self.assertRaises(FileNotFoundError):
-            import uuid
             import_data(str(uuid.uuid4()))
 
 
 class MockDataTestCase(unittest.TestCase):
     """"Fake data for testing"""
     def create_fake_data(self):
+        """Create fake data for testing"""
         self.quant_columns = ['quant_1', 'quant_2']
         self.cat_columns = ['cat_1', 'cat_2']
         self.response = 'target'
@@ -45,6 +53,8 @@ class MockDataTestCase(unittest.TestCase):
                 'Good', 'Bad'
             ]
         })
+        # repeat data ten times
+        self.df = pd.concat([self.df] * 10, ignore_index=True)
 
 
 class TestEda(MockDataTestCase):
@@ -53,11 +63,11 @@ class TestEda(MockDataTestCase):
         self.create_fake_data()
         self.output_dir = Path('./test_outputs/images/eda')
 
-        _ = perform_eda(df=self.df,
-                        cat_columns=self.cat_columns,
-                        quant_columns=self.quant_columns,
-                        response=self.response,
-                        output_dir=self.output_dir)
+        perform_eda(df=self.df,
+                    cat_columns=self.cat_columns,
+                    quant_columns=self.quant_columns,
+                    response=self.response,
+                    output_dir=self.output_dir)
 
     def test_directory_tree_correct(self):
         """Test if all expcted folders are created"""
@@ -98,6 +108,7 @@ class TestEda(MockDataTestCase):
 
 
 class TestCategoricalEncoder(MockDataTestCase):
+    """Tests for categorical encoding handling"""
     def setUp(self):
         self.create_fake_data()
         self.out = encoder_helper(df=self.df,
@@ -143,7 +154,7 @@ class TestFeatureEngineering(MockDataTestCase):
                 quant_columns=self.quant_columns,
                 response=self.response)
 
-    def test_X_dtype(self):
+    def test_x_dtype(self):
         """Test if Xs dtypes are correct"""
         self.assertTrue(self.X_train.dtypes.eq(np.float32).all())
         self.assertTrue(self.X_test.dtypes.eq(np.float32).all())
@@ -153,7 +164,7 @@ class TestFeatureEngineering(MockDataTestCase):
         self.assertEqual(self.y_train.dtype, np.int64)
         self.assertEqual(self.y_test.dtype, np.int64)
 
-    def test_consistent_length_X_y_train(self):
+    def test_consistent_length_x_y_train(self):
         """Default X and y check for sklearn estimators"""
         try:
             sklearn.utils.check_X_y(self.X_train, self.y_train)
@@ -161,7 +172,7 @@ class TestFeatureEngineering(MockDataTestCase):
             self.fail('Xy test data does not pass sklearn default data check.')
             raise  # forward sklearn exception
 
-    def test_consistent_length_X_y_test(self):
+    def test_consistent_length_x_y_test(self):
         """Default X and y check for sklearn estimators"""
         try:
             sklearn.utils.check_X_y(self.X_test, self.y_test)
@@ -178,6 +189,35 @@ class TestFeatureEngineering(MockDataTestCase):
         self.assertListEqual(expected_names, self.X_test.columns.tolist())
 
 
+class TestClassificationReportPlots(MockDataTestCase):
+    """Tests for classification report"""
+    def setUp(self) -> None:
+        self.create_fake_data()
+        self.labels_trues_preds = {
+            'clf_1_train':
+            (np.random.choice([0, 1], 10), np.random.choice([0, 1], 10)),
+            'clf_2_test': (np.random.choice([0, 1],
+                                            10), np.random.choice([0, 1], 10)),
+        }
+        self.results_dir = Path('./test_outputs/results')
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+
+    def test_simple_plot(self):
+        """Test we can make a simple plot"""
+        output_file = self.results_dir / 'test_classification_report_simple.png'
+        classification_report_image(labels_trues_preds=self.labels_trues_preds,
+                                    output_file=output_file)
+        self.assertTrue(Path(output_file).is_file())
+
+    def test_kwargs_plot(self):
+        """Test we can plot passing kwargs to sklearn classification report"""
+        output_file = self.results_dir / 'test_classification_report_kwargs.png'
+        classification_report_image(labels_trues_preds=self.labels_trues_preds,
+                                    output_file=output_file,
+                                    digits=4)
+        self.assertTrue(Path(output_file).is_file())
+
+
 class TestFeatureImportancePlots(MockDataTestCase):
     """Test for feature importance plots"""
     def setUp(self):
@@ -186,7 +226,7 @@ class TestFeatureImportancePlots(MockDataTestCase):
         self.feature_importances = np.arange(len(self.feature_names)) * 10 + 1
         self.results_dir = Path('./test_outputs/results')
         self.results_dir.mkdir(parents=True, exist_ok=True)
-        _ = feature_importance_plot(
+        feature_importance_plot(
             feature_names=self.feature_names,
             feature_importances=self.feature_importances,
             output_pth=self.results_dir / 'test_feature_importances.png')
@@ -198,10 +238,44 @@ class TestFeatureImportancePlots(MockDataTestCase):
         self.assertSetEqual(required_files, required_files & actual_files)
 
 
+class TestTrain(MockDataTestCase):
+    """Tests for train function"""
+    def setUp(self):
+        self.create_fake_data()
+        self.models_dir = Path('./test_outputs/models')
+        self.results_dir = Path('./test_outputs/results')
+        self.X_train, self.X_test, self.y_train, self.y_test = \
+            perform_feature_engineering(
+                df=self.df,
+                cat_columns=self.cat_columns,
+                quant_columns=self.quant_columns,
+                response=self.response)
+        train_models(X_train=self.X_train,
+                     X_test=self.X_test,
+                     y_train=self.y_train,
+                     y_test=self.y_test,
+                     models_dir=self.models_dir,
+                     results_dir=self.results_dir)
 
-#TODO: implement classification_report_image using TDD
-class TestClassificationReportPlots(MockDataTestCase):
-    """Tests for classification report plots"""
-    def setUp(self) -> None:
-        return super().setUp()
+    def test_serialized_models_are_saved(self):
+        """Test if serialized model objects are saved."""
+        required_files = {'logistic_model.pkl', 'rfc_model.pkl'}
+        actual_files = set(x.name for x in self.models_dir.iterdir())
+        self.assertSetEqual(required_files, required_files & actual_files)
 
+    def test_can_open_serialized_models(self):
+        """Test if we can open the serialized models."""
+        try:
+            clf = joblib.load(self.models_dir / 'logistic_model.pkl')
+            _ = clf.predict_proba(self.X_train)
+        except:
+            self.fail('Could not make predictions with loaded serialized '
+                      'logistic regression model')
+            raise
+        try:
+            clf = joblib.load(self.models_dir / 'rfc_model.pkl')
+            _ = clf.predict_proba(self.X_train)
+        except:
+            self.fail('Could not make predictions with loaded serialized '
+                      'random forest model')
+            raise
