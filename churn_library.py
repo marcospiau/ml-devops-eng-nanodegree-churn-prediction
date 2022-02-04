@@ -4,9 +4,10 @@ Owner: marcospiau
 Date: February 3, 2022
 """
 
-# import libraries
 import logging
 import shutil
+import tempfile
+
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -277,12 +278,9 @@ def feature_importance_plot(feature_names: np.ndarray,
     plt.close()
 
 
-def train_models(X_train: pd.DataFrame,
-                 X_test: pd.DataFrame,
-                 y_train: pd.Series,
-                 y_test: pd.Series,
-                 models_dir='./models',
-                 results_dir='./results') -> None:
+def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
+                 y_train: pd.Series, y_test: pd.Series,
+                 output_dir: str) -> None:
     """train, store model results: images + scores, and store models
 
     Args:
@@ -290,10 +288,7 @@ def train_models(X_train: pd.DataFrame,
         X_test (pd.DataFrame): X testing data
         y_train (pd.Series): y training data
         y_test (pd.Series): y testing data
-        models_dir (str, optional): Where to save model artifacts.
-            Defaults to './models'.
-        results_dir (str, optional): Where to save feature importances and
-            results plot. Defaults to './results'.
+        output_dir (str): Where to save model and results files.
     """
 
     lrc = LogisticRegression(random_state=42, n_jobs=-1)
@@ -321,14 +316,15 @@ def train_models(X_train: pd.DataFrame,
     logging.info('Finished Random Forest Grid Search')
 
     # save models
-    models_dir = Path(models_dir)
+    output_dir = Path(output_dir)
+    models_dir = Path(output_dir / 'models')
     models_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(cv_rfc.best_estimator_, models_dir / 'rfc_model.pkl')
     joblib.dump(lrc, models_dir / 'logistic_model.pkl')
 
     # feature importances plots
     logging.info('Creating feature importance plots')
-    results_dir = Path(results_dir)
+    results_dir = Path(output_dir / 'results')
     results_dir.mkdir(parents=True, exist_ok=True)
     feature_importance_plot(
         feature_names=np.r_[['Intercept'], lrc.feature_names_in_],
@@ -372,10 +368,15 @@ def train_models(X_train: pd.DataFrame,
 
 
 def create_output_directory_tree(output_dir: str) -> None:
+    """Creates directory tree for outputs.
+
+    Args:
+        output_dir (str): base directory for outputs.
+    """
     output_dir = Path(output_dir)
     try:
         output_dir.mkdir(parents=True, exist_ok=False)
-    except FileExistsError as err:
+    except FileExistsError:
         logging.error('Output directory %s already exists', output_dir)
         raise
 
@@ -389,15 +390,8 @@ def main():
 
     # Create directory tree
     logging.info('Creating output directory tree')
-    OUTPUT_DIR = Path('./output_dir')
-    create_output_directory_tree(output_dir=OUTPUT_DIR)
-    # output_dir = Path('./output_dir')
-    # if output_dir.is_dir():
-    #     logging.info('output_dir %s exists, will overwrite it!', output_dir)
-    #     shutil.rmtree(output_dir)
-    # for subdir in ['images', 'models', 'results']:
-    #     (output_dir / subdir).mkdir(parents=True, exist_ok=True)
-    #     del subdir
+    output_dir = Path('./outputs')
+    create_output_directory_tree(output_dir)
 
     df = import_data('./data/bank_data.csv')
     df['Churn'] = np.where(df['Attrition_Flag'].eq('Attrited Customer'), 1, 0)
@@ -429,7 +423,7 @@ def main():
                 cat_columns=cat_columns,
                 quant_columns=quant_columns,
                 response='Churn',
-                output_dir=OUTPUT_DIR / 'images' / 'eda')
+                output_dir=output_dir / 'images' / 'eda')
 
     # feature engineering
     X_train, X_test, y_train, y_test = perform_feature_engineering(
@@ -443,21 +437,20 @@ def main():
                  X_test=X_test,
                  y_train=y_train,
                  y_test=y_test,
-                 models_dir=OUTPUT_DIR / 'models',
-                 results_dir=OUTPUT_DIR / 'results')
+                 output_dir=output_dir)
     logging.info('PROCESS END')
 
 
 if __name__ == '__main__':
-    # Configure logging: both on console and file
-    logging_format = (
+    LOGGING_FORMAT = (
         '%(asctime)s %(levelname)s - %(filename)s - %(funcName)s - %(message)s'
     )
-    logging.basicConfig(
-        filename='./results.log',
-        level=logging.INFO,
-        filemode='w',
-        # format='%(name)s - %(levelname)s - %(message)s'
-        format=logging_format,
-        datefmt='%Y-%m-%d %H:%M:%S')
+    temp_log_file = tempfile.mktemp()
+    logging.basicConfig(filename=temp_log_file,
+                        level=logging.INFO,
+                        filemode='w',
+                        format=LOGGING_FORMAT,
+                        datefmt='%Y-%m-%d %H:%M:%S')
     main()
+    shutil.copy(temp_log_file, './outputs/logs/results.log')
+    Path(temp_log_file).unlink()

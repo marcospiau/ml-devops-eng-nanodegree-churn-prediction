@@ -4,6 +4,7 @@ Owner: marcospiau
 Date: February 3, 2022
 """
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,12 +12,11 @@ import joblib
 import numpy as np
 import pandas as pd
 import sklearn
-import tempfile
 
-from churn_library import (classification_report_image, encoder_helper,
+from churn_library import (classification_report_image,
+                           create_output_directory_tree, encoder_helper,
                            feature_importance_plot, import_data, perform_eda,
-                           perform_feature_engineering, train_models,
-                           create_output_directory_tree)
+                           perform_feature_engineering, train_models)
 
 
 class TestImportData(unittest.TestCase):
@@ -58,6 +58,10 @@ class TestCreateDirectoryTree(unittest.TestCase):
 
 class MockDataTestCase(unittest.TestCase):
     """"Fake data for testing"""
+
+    # pylint: disable=attribute-defined-outside-init
+    # TODO: improve test logic so we not need to supress this warning
+    # This warning is disabled to make data mocking possible
     def create_fake_data(self):
         """Create fake data for testing"""
         self.quant_columns = ['quant_1', 'quant_2']
@@ -262,8 +266,8 @@ class TestTrain(MockDataTestCase):
     """Tests for train function"""
     def setUp(self):
         self.create_fake_data()
-        self.models_dir = Path('./test_outputs/models')
-        self.results_dir = Path('./test_outputs/results')
+        self.output_dir = Path('./outputs')
+        self.models_dir = self.output_dir / 'models'
         self.X_train, self.X_test, self.y_train, self.y_test = \
             perform_feature_engineering(
                 df=self.df,
@@ -274,8 +278,7 @@ class TestTrain(MockDataTestCase):
                      X_test=self.X_test,
                      y_train=self.y_train,
                      y_test=self.y_test,
-                     models_dir=self.models_dir,
-                     results_dir=self.results_dir)
+                     output_dir=self.output_dir)
 
     def test_serialized_models_are_saved(self):
         """Test if serialized model objects are saved."""
