@@ -371,19 +371,33 @@ def train_models(X_train: pd.DataFrame,
                                 'classification_report_image.png')
 
 
+def create_output_directory_tree(output_dir: str) -> None:
+    output_dir = Path(output_dir)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as err:
+        logging.error('Output directory %s already exists', output_dir)
+        raise
+
+    for subdir in ['images', 'models', 'results', 'logs']:
+        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+
 def main():
     """Function that encapsulates main process."""
     logging.info('Starting script')
 
     # Create directory tree
     logging.info('Creating output directory tree')
-    output_dir = Path('./output_dir')
-    if output_dir.is_dir():
-        logging.info('output_dir %s exists, will overwrite it!', output_dir)
-        shutil.rmtree(output_dir)
-    for subdir in ['./images', './models', './results']:
-        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
-        del subdir
+    OUTPUT_DIR = Path('./output_dir')
+    create_output_directory_tree(output_dir=OUTPUT_DIR)
+    # output_dir = Path('./output_dir')
+    # if output_dir.is_dir():
+    #     logging.info('output_dir %s exists, will overwrite it!', output_dir)
+    #     shutil.rmtree(output_dir)
+    # for subdir in ['images', 'models', 'results']:
+    #     (output_dir / subdir).mkdir(parents=True, exist_ok=True)
+    #     del subdir
 
     df = import_data('./data/bank_data.csv')
     df['Churn'] = np.where(df['Attrition_Flag'].eq('Attrited Customer'), 1, 0)
@@ -415,7 +429,7 @@ def main():
                 cat_columns=cat_columns,
                 quant_columns=quant_columns,
                 response='Churn',
-                output_dir=output_dir / 'images' / 'eda')
+                output_dir=OUTPUT_DIR / 'images' / 'eda')
 
     # feature engineering
     X_train, X_test, y_train, y_test = perform_feature_engineering(
@@ -429,19 +443,21 @@ def main():
                  X_test=X_test,
                  y_train=y_train,
                  y_test=y_test,
-                 models_dir=output_dir / 'models',
-                 results_dir=output_dir / 'results')
+                 models_dir=OUTPUT_DIR / 'models',
+                 results_dir=OUTPUT_DIR / 'results')
     logging.info('PROCESS END')
 
 
 if __name__ == '__main__':
+    # Configure logging: both on console and file
+    logging_format = (
+        '%(asctime)s %(levelname)s - %(filename)s - %(funcName)s - %(message)s'
+    )
     logging.basicConfig(
-        # filename='./test_results.log',
+        filename='./results.log',
         level=logging.INFO,
         filemode='w',
         # format='%(name)s - %(levelname)s - %(message)s'
-        format=
-        '%(asctime)s %(levelname)s - %(filename)s - %(funcName)s - %(message)s',
+        format=logging_format,
         datefmt='%Y-%m-%d %H:%M:%S')
-
     main()

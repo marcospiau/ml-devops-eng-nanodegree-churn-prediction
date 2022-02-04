@@ -1,4 +1,3 @@
-name: uda_2
 channels:
   - defaults
 dependencies:
