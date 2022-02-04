@@ -1,7 +1,7 @@
 # Predict Customer Churn
-This repository contain my submission for the project **Predict Customer Churn**, final project for lesson $COLOCAR LESSONS$, first course of [ML DevOps Engineer Nanodegree Udacity](https://www.udacity.com/course/machine-learning-dev-ops-engineer-nanodegree--nd0821).
+This repository contain my submission for the project **Predict Customer Churn**, project for lesson **2. Clean Code Principles**, included in [ML DevOps Engineer Nanodegree Udacity](https://www.udacity.com/course/machine-learning-dev-ops-engineer-nanodegree--nd0821).
 
-This project used machine learning models to predict which customers are more likely to cancel their account, using good pratices of coding blabla.
+This project used machine learning models to predict which customers are more likely to cancel their account, using clean code principles.
 
 
 ## How to setup the environment
@@ -117,7 +117,7 @@ Your code has been rated at 9.97/10 (previous run: 9.97/10, +0.00)
 Besides the modifications in `.pylintrc`, we also supress `attribute-defined-outside-init` on a specific portion of code (class `MockDataTestCase`), in order to make data mocking possible on tests; improve testing logic in order to not need this workaround is future work.
 
 ## Code formatting
-For code formatting, a mix of [`yapf`](https://github.com/google/yapf), [`autopep8`](https://github.com/hhatto/autopep8)] and manual adjustments is used.
+For code formatting, a mix of [`yapf`](https://github.com/google/yapf), [`autopep8`](https://github.com/hhatto/autopep8)], both using default settings.
 To format code using `yapf`:
 ```bash
 yapf -i file_name.py
