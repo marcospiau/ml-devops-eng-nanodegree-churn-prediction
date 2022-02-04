@@ -35,7 +35,7 @@ class TestImportData(unittest.TestCase):
         """Test loading of a non existent file"""
         with tempfile.TemporaryDirectory() as tmpdirname:
             with self.assertRaises(FileNotFoundError):
-                import_data(Path(tmpdirname) / 'this_file_doesnt_exists.csv')
+                import_data(Path(tmpdirname) / 'this_file_doesnt_exist.csv')
 
 
 class TestCreateDirectoryTree(unittest.TestCase):
