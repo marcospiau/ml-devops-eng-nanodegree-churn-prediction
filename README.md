@@ -114,7 +114,7 @@ churn_library.py:281:0: R0914: Too many local variables (17/15) (too-many-locals
 ------------------------------------------------------------------
 Your code has been rated at 9.97/10 (previous run: 9.97/10, +0.00)
 ```
-Besides the modifications in `.pylintrc`, we also supress `attribute-defined-outside-init` on a specific portion of code (class `MockDataTestCase`), in order to make data mocking possible on tests; improve the testing logic in order to not need this workaround is future work.
+Besides the modifications in `.pylintrc`, we also supress `attribute-defined-outside-init` on a specific portion of code (class `MockDataTestCase`), in order to make data mocking possible on tests; improve testing logic in order to not need this workaround is future work.
 
 ## Code formatting
 For code formatting, a mix of [`yapf`](https://github.com/google/yapf), [`autopep8`](https://github.com/hhatto/autopep8)] and manual adjustments is used.
