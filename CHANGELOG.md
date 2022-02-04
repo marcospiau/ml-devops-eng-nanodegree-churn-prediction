@@ -19,4 +19,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - unnecessary files from submission
 
-[0.0.1]: https://github.com/marcospiau/ml-devops-eng-nanodegree-churn-prediction/v0.0.1
+[0.0.1]: https://github.com/marcospiau/ml-devops-eng-nanodegree-churn-prediction/releases/tag/0.0.1
