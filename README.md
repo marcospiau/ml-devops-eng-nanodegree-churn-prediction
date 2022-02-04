@@ -23,7 +23,7 @@ This project used machine learning models to predict which customers are more li
 
 
 
-## How to setup the environment
+# How to setup the environment
 We use miniconda to manage Python packages installation.
 
 Install minconda (skip if Anaconda or Miniconda are installed):
@@ -42,7 +42,7 @@ Activate the environement:
 ```bash
 conda activate uda_1
 ```
-## Running Files
+# Running Files
 How do you run your files? What should happen when you run your files?
 ## Main script
 The main script (`churn_library.py`) performs the entire modeling pipeline:
