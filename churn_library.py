@@ -6,6 +6,7 @@ Date: February 3, 2022
 
 import logging
 import shutil
+from sys import excepthook
 import tempfile
 
 from pathlib import Path
@@ -22,6 +23,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import RocCurveDisplay, classification_report
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.preprocessing import minmax_scale
+import argparse
+import yaml
+import copy
+from importlib import import_module
+import sklearn
 
 
 def import_data(path: str) -> pd.DataFrame:
@@ -50,6 +56,32 @@ def import_data(path: str) -> pd.DataFrame:
         raise
 
 
+def load_yaml(path: str) -> Dict:
+    with open(path, 'r') as handler:
+        return yaml.load(handler, Loader=yaml.FullLoader)
+
+
+def create_output_directory_tree(output_dir: str) -> None:
+    """Creates directory tree for outputs.
+
+    Args:
+        output_dir (str): base directory for outputs.
+    """
+    output_dir = Path(output_dir)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        logging.error('Output directory %s already exists', output_dir)
+        raise
+
+    for subdir in [
+            'images/eda/categorical_features',
+            'images/eda/quantitative_features', 'images/eda/target', 'models',
+            'results', 'logs'
+    ]:
+        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+
 def perform_eda(df: pd.DataFrame,
                 cat_columns: List[str],
                 quant_columns: List[str],
@@ -67,7 +99,7 @@ def perform_eda(df: pd.DataFrame,
     """
     # Initialize directory Tree
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=False, exist_ok=True)
     for subdir in ['target', 'categorical_features', 'quantitative_features']:
         (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
@@ -255,9 +287,9 @@ def classification_report_image(labels_trues_preds: Dict[str, Tuple[np.array,
     plt.close()
 
 
-def feature_importance_plot(feature_names: np.ndarray,
-                            feature_importances: np.ndarray,
-                            output_pth: str) -> None:
+def feature_importance_plot(model: sklearn.base.BaseEstimator,
+                            output_pth: str,
+                            feature_names: np.ndarray = None) -> None:
     """Save feature importances plot.
 
     Args:
@@ -265,6 +297,22 @@ def feature_importance_plot(feature_names: np.ndarray,
         feature_importances (np.ndarray): array containing feature importances.
         output_pth (str): where to save the plot.
     """
+    try:
+        assert feature_names is not None or hasattr(model, 'feature_names_in_')
+        feature_names = feature_names or getattr(model, 'feature_names_in_')
+        feature_names = list(feature_names)
+    except ValueError:
+        logging.error('feature names should be not None or model must have '
+                      '`feature_names_in_` attribute')
+        raise
+
+    if hasattr(model, 'coef_'):
+        feature_importances = model.intercept_.tolist() + model.coef_.ravel(
+        ).tolist()
+        feature_names.insert(0, '<INTERCEPT>')
+    elif hasattr(model, 'feature_importances_'):
+        feature_importances = model.feature_importances_
+
     df = pd.DataFrame()
     df['feature_names'] = feature_names.copy()
     df['feature_importances'] = feature_importances.copy()
@@ -278,9 +326,34 @@ def feature_importance_plot(feature_names: np.ndarray,
     plt.close()
 
 
+def load_model_cls(cls_name):
+    first, second = cls_name.rsplit('.', 1)
+    model_cls = getattr(import_module(first), second)
+    return model_cls
+
+
+def run_grid_search(X, y, **grid_search_kwargs) -> sklearn.base.BaseEstimator:
+    grid_obj = RandomizedSearchCV(**run_grid_search)
+    grid_obj.fit(X, y)
+    return grid_obj.best_estimator_
+
+
+def make_auc_plots(preds_and_trues: Dict[str, Tuple[np.array, np.array]],
+                   output_file: str) -> None:
+    _, ax = plt.subplots()
+    for label, (y_true, y_preds) in preds_and_trues.items():
+        RocCurveDisplay.from_predictions(y_true=y_true,
+                                         y_pred=y_preds,
+                                         name=label,
+                                         ax=ax)
+    plt.savefig(output_file)
+    plt.clf()
+    plt.close()
+    del ax
+
+
 def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
-                 y_train: pd.Series, y_test: pd.Series,
-                 output_dir: str) -> None:
+                 y_train: pd.Series, y_test: pd.Series, config: Dict) -> None:
     """train, store model results: images + scores, and store models
 
     Args:
@@ -291,74 +364,48 @@ def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
         output_dir (str): Where to save model and results files.
     """
 
-    lrc = LogisticRegression(random_state=42, n_jobs=-1)
-    logging.info('Starting logistic Regression Classifier fitting')
-    lrc.fit(X_train, y_train)
-
-    logging.info('Finished logistic Regression Classifier fitting')
-
-    # grid search
-    logging.info('Starting random Forest Grid Search')
-    rfc = RandomForestClassifier(random_state=42, n_jobs=-1)
-    rfc_param_grid = {
-        'n_estimators': [200, 500],
-        'max_features': ['auto', 'sqrt'],
-        'max_depth': [4, 5, 100],
-        'criterion': ['gini', 'entropy']
-    }
-    cv_rfc = RandomizedSearchCV(
-        estimator=rfc,
-        param_distributions=rfc_param_grid,
-        cv=5,
-        # verbose=10,
-        n_iter=2)
-    cv_rfc.fit(X_train, y_train)
-    logging.info('Finished Random Forest Grid Search')
-
-    # save models
-    output_dir = Path(output_dir)
+    output_dir = Path(config['output_dir'])
     models_dir = Path(output_dir / 'models')
-    models_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(cv_rfc.best_estimator_, models_dir / 'rfc_model.pkl')
-    joblib.dump(lrc, models_dir / 'logistic_model.pkl')
-
-    # feature importances plots
-    logging.info('Creating feature importance plots')
     results_dir = Path(output_dir / 'results')
-    results_dir.mkdir(parents=True, exist_ok=True)
-    feature_importance_plot(
-        feature_names=np.r_[['Intercept'], lrc.feature_names_in_],
-        feature_importances=np.r_[lrc.intercept_,
-                                  lrc.coef_.ravel()],
-        output_pth=results_dir / 'logistic_model_coefs.png')
-    feature_importance_plot(
-        feature_names=cv_rfc.best_estimator_.feature_names_in_,
-        feature_importances=cv_rfc.best_estimator_.feature_importances_,
-        output_pth=results_dir / 'rfc_model_feature_importances.png')
+    # models_dir.mkdir(parents=True, exist_ok=True)
+
+    # Train
+    best_models = {}
+    model_classes = {}
+    # Run all grid searches and get best model trained
+    logging.info('Starting grid searches')
+    for model_name, model_config in config['models'].items():
+        logging.info(f'Started {model_name} grid search')
+        model_classes[model_name] = model_config['model_cls']
+        best_models[model_name] = run_grid_search(
+            X=X_train,
+            y=y_train,
+            **{
+                **{
+                    'estimator': model_classes[model_name]
+                },
+                **model_config['grid_params']
+            })
+        joblib.dump(best_models[model_name],
+                    models_dir / f'best_{model_name}.pkl')
+        feature_importance_plot(model=best_models[model_name],
+                                output_pth=results_dir /
+                                f'{model_name}_feature_importances.png')
+        logging.info(f'Finished {model_name} grid search')
+
+    logging.info(f'Finished grid searches')
 
     # Data used for metrics evaluation
     logging.info('Predicting scores for train and test')
     preds_and_trues = {}
-    preds_and_trues['Logistic Regression - train'] = (
-        y_train, lrc.predict_proba(X_train)[:, 1])
-    preds_and_trues['Logistic Regression - test'] = (
-        y_test, lrc.predict_proba(X_test)[:, 1])
-    preds_and_trues['Random Forest - train'] = (
-        y_train, cv_rfc.best_estimator_.predict_proba(X_train)[:, 1])
-    preds_and_trues['Random Forest - test'] = (
-        y_test, cv_rfc.best_estimator_.predict_proba(X_test)[:, 1])
+    for model_name, model_obj in best_models.items():
+        preds_and_trues[f'{model_name} - train'] = (
+            model_obj.predict_proba(X_train), y_train)
+        preds_and_trues[f'{model_name} - test'] = (
+            model_obj.predict_proba(X_test), y_test)
 
     logging.info('Creating AUC plots')
-    _, ax = plt.subplots()
-    for label, (y_true, y_preds) in preds_and_trues.items():
-        RocCurveDisplay.from_predictions(y_true=y_true,
-                                         y_pred=y_preds,
-                                         name=label,
-                                         ax=ax)
-    plt.savefig(results_dir / 'auc_roc_curves.png')
-    plt.clf()
-    plt.close()
-    del ax
+    make_auc_plots(preds_and_trues, results_dir / 'auc_roc_curves.png')
 
     ## classification reports
     logging.info('Creating classification reports')
@@ -367,48 +414,23 @@ def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
                                 'classification_report_image.png')
 
 
-def create_output_directory_tree(output_dir: str) -> None:
-    """Creates directory tree for outputs.
-
-    Args:
-        output_dir (str): base directory for outputs.
-    """
-    output_dir = Path(output_dir)
-    try:
-        output_dir.mkdir(parents=True, exist_ok=False)
-    except FileExistsError:
-        logging.error('Output directory %s already exists', output_dir)
-        raise
-
-    for subdir in ['images', 'models', 'results', 'logs']:
-        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
-
-
-def main():
+def main(config):
     """Function that encapsulates main process."""
     logging.info('Starting script')
 
     # Create directory tree
     logging.info('Creating output directory tree')
-    output_dir = Path('./outputs')
-    create_output_directory_tree(output_dir)
+    output_dir = Path(config['output_dir'])
+    create_output_directory_tree(config['output_dir'])
 
-    df = import_data('./data/bank_data.csv')
+    df = import_data(config['csv_path'])
+
+    # FIXME: make this configurable
     df['Churn'] = np.where(df['Attrition_Flag'].eq('Attrited Customer'), 1, 0)
 
     # Define column roles
-    cat_columns = [
-        'Gender', 'Education_Level', 'Marital_Status', 'Income_Category',
-        'Card_Category'
-    ]
-
-    quant_columns = [
-        'Customer_Age', 'Dependent_count', 'Months_on_book',
-        'Total_Relationship_Count', 'Months_Inactive_12_mon',
-        'Contacts_Count_12_mon', 'Credit_Limit', 'Total_Revolving_Bal',
-        'Avg_Open_To_Buy', 'Total_Amt_Chng_Q4_Q1', 'Total_Trans_Amt',
-        'Total_Trans_Ct', 'Total_Ct_Chng_Q4_Q1', 'Avg_Utilization_Ratio'
-    ]
+    cat_columns = config['categorical_features']
+    quant_columns = config['numeric_features']
 
     cols_and_types = [(col, 'cat') for col in cat_columns]
     cols_and_types += [(col, 'quant') for col in quant_columns]
@@ -442,15 +464,27 @@ def main():
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Run modeling for chun analysis',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--config',
+                        required=True,
+                        type=str,
+                        help='yaml configuration file')
+    args = parser.parse_args()
+
     LOGGING_FORMAT = (
         '%(asctime)s %(levelname)s - %(filename)s - %(funcName)s - %(message)s'
     )
     temp_log_file = tempfile.mktemp()
-    logging.basicConfig(filename=temp_log_file,
-                        level=logging.INFO,
-                        filemode='w',
-                        format=LOGGING_FORMAT,
-                        datefmt='%Y-%m-%d %H:%M:%S')
-    main()
-    shutil.copy(temp_log_file, './outputs/logs/results.log')
-    Path(temp_log_file).unlink()
+    logging.basicConfig(
+        # filename=temp_log_file,
+        level=logging.INFO,
+        filemode='w',
+        format=LOGGING_FORMAT,
+        datefmt='%Y-%m-%d %H:%M:%S')
+
+    config = load_yaml(args.config)
+    main(config)
+    # shutil.copy(temp_log_file, './outputs/logs/results.log')
+    # Path(temp_log_file).unlink()

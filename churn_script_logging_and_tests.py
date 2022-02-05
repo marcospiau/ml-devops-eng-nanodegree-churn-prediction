@@ -12,11 +12,14 @@ import joblib
 import numpy as np
 import pandas as pd
 import sklearn
+import shutil
+import yaml
 
 from churn_library import (classification_report_image,
                            create_output_directory_tree, encoder_helper,
                            feature_importance_plot, import_data, perform_eda,
-                           perform_feature_engineering, train_models)
+                           perform_feature_engineering, train_models,
+                           load_yaml)
 
 
 class TestImportData(unittest.TestCase):
@@ -38,6 +41,19 @@ class TestImportData(unittest.TestCase):
                 import_data(Path(tmpdirname) / 'this_file_doesnt_exist.csv')
 
 
+class TestYamlLoading(unittest.TestCase):
+    """Tests for yaml loading"""
+    def test_load_fake_file(self):
+        """Test if saved and loaded content is the same."""
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            expected_output = {'k1': 1, 'k2': 2, 'k3': {'k4': [1, 2]}}
+            tmp_yaml_file = Path(tmpdirname) / 'test_yaml.yml'
+            with open(tmp_yaml_file, 'w') as outfile:
+                yaml.dump(expected_output, outfile)
+            loaded_output = load_yaml(tmp_yaml_file)
+            self.assertDictEqual(loaded_output, expected_output)
+
+
 class TestCreateDirectoryTree(unittest.TestCase):
     """Tests for directory creation"""
     def test_error_if_exists(self):
@@ -48,26 +64,27 @@ class TestCreateDirectoryTree(unittest.TestCase):
 
     def test_correct_creation(self):
         """Test if error is raised for already existent directory."""
+        required_dirs = {
+            'images/eda/categorical_features',
+            'images/eda/quantitative_features', 'images/eda/target',
+            'images/eda', 'images', 'models', 'results', 'logs'
+        }
         with tempfile.TemporaryDirectory() as tmpdirname:
             output_dir = Path(tmpdirname) / 'tmp_output'
+            required_dirs = set(output_dir / Path(x) for x in required_dirs)
             create_output_directory_tree(output_dir)
-            required_dirs = {'images', 'models', 'results', 'logs'}
-            actual_dirs = set(x.name for x in Path(output_dir).iterdir())
+            actual_dirs = set(x for x in output_dir.rglob('*') if x.is_dir())
             self.assertSetEqual(required_dirs, actual_dirs)
 
-
 class MockDataTestCase(unittest.TestCase):
-    """"Fake data for testing"""
-
-    # pylint: disable=attribute-defined-outside-init
-    # TODO: improve test logic so we not need to supress this warning
-    # This warning is disabled to make data mocking possible
-    def create_fake_data(self):
-        """Create fake data for testing"""
-        self.quant_columns = ['quant_1', 'quant_2']
-        self.cat_columns = ['cat_1', 'cat_2']
-        self.response = 'target'
-        self.df = pd.DataFrame({
+    """Test main flow"""
+    @classmethod
+    def setUpClass(cls):
+        """Initialize fake data and directory for tests"""
+        cls.quant_columns = ['quant_1', 'quant_2']
+        cls.cat_columns = ['cat_1', 'cat_2']
+        cls.response = 'target'
+        cls.df = pd.DataFrame({
             'target': [0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
             'quant_1': [0.1, 0.2, 0.3, 0.9, 10, 12, 13, 18, 9, 10],
             'quant_2': [0, 1, 2, 3, 5.5, 6.6, 7.7, 8.8, 9.9, 10],
@@ -78,39 +95,46 @@ class MockDataTestCase(unittest.TestCase):
             ]
         })
         # repeat data ten times
-        self.df = pd.concat([self.df] * 10, ignore_index=True)
+        cls.df = pd.concat([cls.df] * 10, ignore_index=True)
+        cls.output_dir = Path('tests_outputs_2')
+        if cls.output_dir.is_dir():
+            shutil.rmtree(cls.output_dir)
+        create_output_directory_tree(cls.output_dir)
 
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.output_dir)
 
 class TestEda(MockDataTestCase):
-    """Test EDA execution and output files"""
-    def setUp(self):
-        self.create_fake_data()
-        self.output_dir = Path('./test_outputs/images/eda')
+    """Tests for EDA process"""
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        perform_eda(df=cls.df,
+                    cat_columns=cls.cat_columns,
+                    quant_columns=cls.quant_columns,
+                    response=cls.response,
+                    output_dir=cls.output_dir/'images/eda')
 
-        perform_eda(df=self.df,
-                    cat_columns=self.cat_columns,
-                    quant_columns=self.quant_columns,
-                    response=self.response,
-                    output_dir=self.output_dir)
-
-    def test_directory_tree_correct(self):
-        """Test if all expcted folders are created"""
+    def test_eda_directory_tree_correct(self):
+        """Test if all expcted EDA folders are created"""
         folders_to_match = {
             'quantitative_features', 'categorical_features', 'target'
         }
-        actual_folders = set(x.name for x in self.output_dir.iterdir())
+        actual_folders = set(
+            x.name for x in (self.output_dir / 'images/eda').iterdir())
         self.assertSetEqual(folders_to_match, actual_folders)
-
-    def test_categorical_features_plots_created(self):
+        
+    def test_eda_categorical_features_plots_created(self):
         """Test if categorical columns EDA plots are created"""
         names_pat = ['mean_response_%s.png', 'univariate_distribution_%s.png']
         files_to_match = set(name % col for col in self.cat_columns
                              for name in names_pat)
-        created_files = set(x.name for x in (self.output_dir /
-                                             'categorical_features').iterdir())
-        self.assertSetEqual(files_to_match, set(created_files))
+        dir_to_test = self.output_dir / 'images/eda/categorical_features'
+        created_files = set(x.name for x in dir_to_test.iterdir())
+        self.assertSetEqual(files_to_match, created_files)
 
-    def test_quant_features_plots_created(self):
+    def test_eda_quant_features_plots_created(self):
         """Test if quantitative columns EDA plots are created"""
         names_pat = [
             'histogram_by_target_%s.png', 'univariate_histogram_%s.png'
@@ -118,26 +142,25 @@ class TestEda(MockDataTestCase):
         files_to_match = set(name % col for col in self.quant_columns
                              for name in names_pat)
         files_to_match.add('correlation_matrix_quant_columns.png')
-        created_files = set(x.name
-                            for x in (self.output_dir /
-                                      'quantitative_features').iterdir())
-        self.assertSetEqual(files_to_match, set(created_files))
+        dir_to_test = self.output_dir / 'images/eda/quantitative_features'
+        created_files = set(x.name for x in dir_to_test.iterdir())
+        self.assertSetEqual(files_to_match, created_files)
 
-    def test_target_plots(self):
+    def test_eda_target_plot_created(self):
         """Test if target column EDA plots are created"""
         expected_files = {'target_distribution.png'}
-        actual_files = set(x.name
-                           for x in (self.output_dir / 'target').iterdir())
+        dir_to_test = self.output_dir / 'images/eda/target'
+        actual_files = set(x.name for x in dir_to_test.iterdir())
         self.assertSetEqual(expected_files, actual_files)
-
 
 class TestCategoricalEncoder(MockDataTestCase):
     """Tests for categorical encoding handling"""
-    def setUp(self):
-        self.create_fake_data()
-        self.out = encoder_helper(df=self.df,
-                                  category_lst=self.cat_columns,
-                                  response=self.response)
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.out = encoder_helper(df=cls.df,
+                                  category_lst=cls.cat_columns,
+                                  response=cls.response)
 
     def test_correct_shape(self):
         """Test if output has correct shape"""
@@ -166,17 +189,17 @@ class TestCategoricalEncoder(MockDataTestCase):
         """Check if output shape is same as input"""
         self.assertTupleEqual(self.df[self.cat_columns].shape, self.out.shape)
 
-
 class TestFeatureEngineering(MockDataTestCase):
     """Test feature engineering process"""
-    def setUp(self):
-        self.create_fake_data()
-        self.X_train, self.X_test, self.y_train, self.y_test = \
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.X_train, cls.X_test, cls.y_train, cls.y_test = \
             perform_feature_engineering(
-                df=self.df,
-                cat_columns=self.cat_columns,
-                quant_columns=self.quant_columns,
-                response=self.response)
+                df=cls.df,
+                cat_columns=cls.cat_columns,
+                quant_columns=cls.quant_columns,
+                response=cls.response)
 
     def test_x_dtype(self):
         """Test if Xs dtypes are correct"""
@@ -212,19 +235,19 @@ class TestFeatureEngineering(MockDataTestCase):
         self.assertListEqual(expected_names, self.X_train.columns.tolist())
         self.assertListEqual(expected_names, self.X_test.columns.tolist())
 
-
 class TestClassificationReportPlots(MockDataTestCase):
     """Tests for classification report"""
-    def setUp(self) -> None:
-        self.create_fake_data()
-        self.labels_trues_preds = {
-            'clf_1_train':
-            (np.random.choice([0, 1], 10), np.random.choice([0, 1], 10)),
-            'clf_2_test': (np.random.choice([0, 1],
-                                            10), np.random.choice([0, 1], 10)),
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        fake_trues = np.r_[np.ones(10), np.zeros(10)]
+        fake_preds = np.r_[np.ones(10), np.zeros(10)]
+        cls.labels_trues_preds = {
+            'clf_1_train': (fake_trues, fake_preds),
+            'clf_2_test': (fake_trues, fake_preds)
         }
-        self.results_dir = Path('./test_outputs/results')
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        cls.results_dir = Path('./test_outputs/results')
+        cls.results_dir.mkdir(parents=True, exist_ok=True)
 
     def test_simple_plot(self):
         """Test we can make a simple plot"""
@@ -244,61 +267,19 @@ class TestClassificationReportPlots(MockDataTestCase):
 
 class TestFeatureImportancePlots(MockDataTestCase):
     """Test for feature importance plots"""
-    def setUp(self):
-        self.create_fake_data()
-        self.feature_names = self.cat_columns + self.quant_columns
-        self.feature_importances = np.arange(len(self.feature_names)) * 10 + 1
-        self.results_dir = Path('./test_outputs/results')
-        self.results_dir.mkdir(parents=True, exist_ok=True)
-        feature_importance_plot(feature_names=self.feature_names,
-                                feature_importances=self.feature_importances,
-                                output_pth=self.results_dir /
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.feature_names = cls.cat_columns + cls.quant_columns
+        cls.feature_importances = np.arange(len(cls.feature_names)) * 10 + 1
+        cls.results_dir = cls.output_dir / 'results'
+        feature_importance_plot(feature_names=cls.feature_names,
+                                feature_importances=cls.feature_importances,
+                                output_pth=cls.output_ /
                                 'test_feature_importances.png')
 
-    def test_expected_files_in_dir(self):
-        """Test if the expected files are in output directory"""
+    def test_models_with_coef(self):
+        """Test we can use models with feature importances"""
         required_files = {'test_feature_importances.png'}
         actual_files = set(x.name for x in self.results_dir.iterdir())
-        self.assertSetEqual(required_files, required_files & actual_files)
-
-
-class TestTrain(MockDataTestCase):
-    """Tests for train function"""
-    def setUp(self):
-        self.create_fake_data()
-        self.output_dir = Path('./outputs')
-        self.models_dir = self.output_dir / 'models'
-        self.X_train, self.X_test, self.y_train, self.y_test = \
-            perform_feature_engineering(
-                df=self.df,
-                cat_columns=self.cat_columns,
-                quant_columns=self.quant_columns,
-                response=self.response)
-        train_models(X_train=self.X_train,
-                     X_test=self.X_test,
-                     y_train=self.y_train,
-                     y_test=self.y_test,
-                     output_dir=self.output_dir)
-
-    def test_serialized_models_are_saved(self):
-        """Test if serialized model objects are saved."""
-        required_files = {'logistic_model.pkl', 'rfc_model.pkl'}
-        actual_files = set(x.name for x in self.models_dir.iterdir())
-        self.assertSetEqual(required_files, required_files & actual_files)
-
-    def test_can_open_serialized_models(self):
-        """Test if we can open the serialized models."""
-        try:
-            clf = joblib.load(self.models_dir / 'logistic_model.pkl')
-            _ = clf.predict_proba(self.X_train)
-        except:
-            self.fail('Could not make predictions with loaded serialized '
-                      'logistic regression model')
-            raise  # Forward exception
-        try:
-            clf = joblib.load(self.models_dir / 'rfc_model.pkl')
-            _ = clf.predict_proba(self.X_train)
-        except:
-            self.fail('Could not make predictions with loaded serialized '
-                      'random forest model')
-            raise  # Forward exception
+        self.assertSetEqual(required_files, required_files & actual_files)        
