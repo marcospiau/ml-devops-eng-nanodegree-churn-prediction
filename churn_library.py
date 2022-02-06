@@ -4,12 +4,14 @@ Owner: marcospiau
 Date: February 3, 2022
 """
 
+import argparse
+import copy
 import logging
 import shutil
-from sys import excepthook
 import tempfile
-
+from importlib import import_module
 from pathlib import Path
+from sys import excepthook
 from typing import Dict, List, Tuple
 
 import joblib
@@ -17,17 +19,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import sklearn
 import tabulate
+import yaml
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import RocCurveDisplay, classification_report
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.preprocessing import minmax_scale
-import argparse
-import yaml
-import copy
-from importlib import import_module
-import sklearn
 
 
 def import_data(path: str) -> pd.DataFrame:
@@ -274,7 +273,7 @@ def classification_report_image(labels_trues_preds: Dict[str, Tuple[np.array,
         label: classification_report(y_true=y_true,
                                      y_pred=(y_pred >= 0.5).astype(int),
                                      **classification_report_kwargs)
-        for label, (y_true, y_pred) in labels_trues_preds.items()
+        for label, (y_pred, y_true) in labels_trues_preds.items()
     }
     filler = 60 * '*'
     all_results = '\n'.join(f"{filler}\n{label}\n{filler}\n{result}"
@@ -301,17 +300,27 @@ def feature_importance_plot(model: sklearn.base.BaseEstimator,
         assert feature_names is not None or hasattr(model, 'feature_names_in_')
         feature_names = feature_names or getattr(model, 'feature_names_in_')
         feature_names = list(feature_names)
-    except ValueError:
+    except AssertionError:
         logging.error('feature names should be not None or model must have '
                       '`feature_names_in_` attribute')
         raise
 
     if hasattr(model, 'coef_'):
-        feature_importances = model.intercept_.tolist() + model.coef_.ravel(
-        ).tolist()
-        feature_names.insert(0, '<INTERCEPT>')
+        feature_importances = model.coef_.ravel().tolist()
+        if hasattr(model, 'intercept_'):
+            intercept = model.intercept_.tolist()
+            try:
+                assert len(intercept) == 1
+            except:
+                logging.error('Intercept should be a single-element array')
+                raise
+            feature_importances.insert(0, intercept[0])
+            feature_names.insert(0, '<INTERCEPT>')
     elif hasattr(model, 'feature_importances_'):
         feature_importances = model.feature_importances_
+    else:
+        raise AttributeError(
+            'Model must have coef_ or feature_importances_ attribute')
 
     df = pd.DataFrame()
     df['feature_names'] = feature_names.copy()
@@ -326,22 +335,51 @@ def feature_importance_plot(model: sklearn.base.BaseEstimator,
     plt.close()
 
 
-def load_model_cls(cls_name):
+def load_model_cls(cls_name: str) -> object:
+    """Import and returns a class. Useful for specifying class to import on
+        yaml config file.
+
+    Args:
+        cls_name (str): class name. Example:
+            sklearn.linear_model.LogisticRegression
+
+    Returns:
+        loaded object
+    """
     first, second = cls_name.rsplit('.', 1)
     model_cls = getattr(import_module(first), second)
     return model_cls
 
 
-def run_grid_search(X, y, **grid_search_kwargs) -> sklearn.base.BaseEstimator:
-    grid_obj = RandomizedSearchCV(**run_grid_search)
+def run_grid_search(X: pd.DataFrame, y: pd.Series,
+                    **grid_search_kwargs) -> sklearn.base.BaseEstimator:
+    """Run randomized grid search and returns best_estimators.
+
+    Args:
+        X (pd.DataFrame): training features
+        y (pd.Series): training targets
+
+    Returns:
+        sklearn.base.BaseEstimator: best model from grid search
+    """
+    grid_obj = RandomizedSearchCV(**grid_search_kwargs)
     grid_obj.fit(X, y)
     return grid_obj.best_estimator_
 
 
 def make_auc_plots(preds_and_trues: Dict[str, Tuple[np.array, np.array]],
                    output_file: str) -> None:
+    """Plots AUC curve for multiple pairs of y_true and y_preds and store as
+        image.
+
+    Args:
+        labels_trues_preds (Dict[str, Tuple[np.array, np.array]]): Dict mapping
+            a string identifier to a tuple of arrays containing true and
+            predicted target values.
+        output_file (str): where to save the plot.
+    """
     _, ax = plt.subplots()
-    for label, (y_true, y_preds) in preds_and_trues.items():
+    for label, (y_preds, y_true) in preds_and_trues.items():
         RocCurveDisplay.from_predictions(y_true=y_true,
                                          y_pred=y_preds,
                                          name=label,
@@ -361,13 +399,12 @@ def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
         X_test (pd.DataFrame): X testing data
         y_train (pd.Series): y training data
         y_test (pd.Series): y testing data
-        output_dir (str): Where to save model and results files.
+        config (Dict): dict with configuration to run the process
     """
 
     output_dir = Path(config['output_dir'])
     models_dir = Path(output_dir / 'models')
     results_dir = Path(output_dir / 'results')
-    # models_dir.mkdir(parents=True, exist_ok=True)
 
     # Train
     best_models = {}
@@ -376,13 +413,13 @@ def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
     logging.info('Starting grid searches')
     for model_name, model_config in config['models'].items():
         logging.info(f'Started {model_name} grid search')
-        model_classes[model_name] = model_config['model_cls']
+        model_classes[model_name] = load_model_cls(model_config['model_cls'])
         best_models[model_name] = run_grid_search(
             X=X_train,
             y=y_train,
             **{
                 **{
-                    'estimator': model_classes[model_name]
+                    'estimator': model_classes[model_name]()
                 },
                 **model_config['grid_params']
             })
@@ -390,7 +427,8 @@ def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
                     models_dir / f'best_{model_name}.pkl')
         feature_importance_plot(model=best_models[model_name],
                                 output_pth=results_dir /
-                                f'{model_name}_feature_importances.png')
+                                f'{model_name}_feature_importances.png',
+                                feature_names=X_train.columns.tolist())
         logging.info(f'Finished {model_name} grid search')
 
     logging.info(f'Finished grid searches')
@@ -400,9 +438,9 @@ def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
     preds_and_trues = {}
     for model_name, model_obj in best_models.items():
         preds_and_trues[f'{model_name} - train'] = (
-            model_obj.predict_proba(X_train), y_train)
+            model_obj.predict_proba(X_train)[:, 1], y_train)
         preds_and_trues[f'{model_name} - test'] = (
-            model_obj.predict_proba(X_test), y_test)
+            model_obj.predict_proba(X_test)[:, 1], y_test)
 
     logging.info('Creating AUC plots')
     make_auc_plots(preds_and_trues, results_dir / 'auc_roc_curves.png')
@@ -423,14 +461,14 @@ def main(config):
     output_dir = Path(config['output_dir'])
     create_output_directory_tree(config['output_dir'])
 
-    df = import_data(config['csv_path'])
+    df = import_data(config['data']['csv_path'])
 
     # FIXME: make this configurable
     df['Churn'] = np.where(df['Attrition_Flag'].eq('Attrited Customer'), 1, 0)
 
     # Define column roles
-    cat_columns = config['categorical_features']
-    quant_columns = config['numeric_features']
+    cat_columns = config['data']['categorical_features']
+    quant_columns = config['data']['numeric_features']
 
     cols_and_types = [(col, 'cat') for col in cat_columns]
     cols_and_types += [(col, 'quant') for col in quant_columns]
@@ -459,7 +497,7 @@ def main(config):
                  X_test=X_test,
                  y_train=y_train,
                  y_test=y_test,
-                 output_dir=output_dir)
+                 config=config)
     logging.info('PROCESS END')
 
 
