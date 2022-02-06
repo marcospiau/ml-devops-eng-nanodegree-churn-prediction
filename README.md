@@ -155,8 +155,6 @@ churn_script_logging_and_tests.py::TestTrainModels::test_serialized_models_are_s
 
 ```
 
-Data generated during tests can be found on `./test_outputs`.
-
 ## Linting
 [`pylint`](https://pylint.org/) is used for code linting. Pylint configuration file `.pylintrc` is modified to supress warning about variables commonly used in data science (ie: df, X_train, etc). Below is the command and expected output using `pylint`:
 ```bash
