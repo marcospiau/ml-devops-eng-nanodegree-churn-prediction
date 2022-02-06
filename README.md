@@ -87,7 +87,7 @@ For tests, we use [`unittest`](https://docs.python.org/3/library/unittest.html) 
 python3 -m pytest -vv churn_script_logging_and_tests.py
 
 =========================================================================================== test session starts ============================================================================================
-platform linux -- Python 3.8.12, pytest-6.2.5, py-1.11.0, pluggy-1.0.0 -- /home/marcospiau/miniconda3/envs/uda_1/bin/python3
+platform linux -- Python 3.8.12, pytest-6.2.5, py-1.11.0, pluggy-1.0.0 -- <REPOPATH>
 cachedir: .pytest_cache
 rootdir: XXXX (SECRET)
 plugins: xdist-2.5.0, forked-1.4.0
