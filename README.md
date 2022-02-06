@@ -103,7 +103,7 @@ python3 -m pytest -vv churn_script_logging_and_tests.py
 ======================================================================================================================== test session starts ========================================================================================================================
 platform linux -- Python 3.8.12, pytest-6.2.5, py-1.11.0, pluggy-1.0.0 -- <REPO_LOCAL_PATH>
 cachedir: .pytest_cache
-rootdir: /home/marcospiau/git_repos/ml-devops-eng-nanodegree/ml-devops-eng-nanodegree-churn-prediction
+rootdir: <REPO_LOCAL_PATH>
 plugins: xdist-2.5.0, forked-1.4.0
 collected 43 items                                                                                                                                                                                                                                                  
 

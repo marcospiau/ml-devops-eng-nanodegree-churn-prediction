@@ -1,4 +1,3 @@
-name: uda_1
 channels:
   - defaults
 dependencies:
@@ -154,4 +153,4 @@ dependencies:
   - pip:
     - appdirs==1.4.4
     - pyyaml==6.0
-prefix: /home/marcospiau/miniconda3/envs/uda_1
+
