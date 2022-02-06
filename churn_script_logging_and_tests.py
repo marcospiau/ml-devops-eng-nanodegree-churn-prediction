@@ -3,13 +3,11 @@ Tests for churn_library.py
 Owner: marcospiau
 Date: February 3, 2022
 """
-
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-from importlib_metadata import requires
 
 import joblib
 import numpy as np
@@ -22,11 +20,12 @@ from churn_library import (classification_report_image,
                            feature_importance_plot, import_data,
                            load_model_cls, load_yaml, make_auc_plots,
                            perform_eda, perform_feature_engineering,
-                           train_models, run_grid_search, main)
+                           run_grid_search, train_models)
 
 
 class TestImportData(unittest.TestCase):
     """Tests for data importing"""
+
     def test_ok_file(self):
         """Test loading of an OK file"""
         df = import_data('./test_data/ok_data.csv')
@@ -46,12 +45,13 @@ class TestImportData(unittest.TestCase):
 
 class TestYamlLoading(unittest.TestCase):
     """Tests for yaml loading"""
+
     def test_load_fake_file(self):
         """Test if saved and loaded content is the same."""
         with tempfile.TemporaryDirectory() as tmpdirname:
             expected_output = {'k1': 1, 'k2': 2, 'k3': {'k4': [1, 2]}}
             tmp_yaml_file = Path(tmpdirname) / 'test_yaml.yml'
-            with open(tmp_yaml_file, 'w') as outfile:
+            with open(tmp_yaml_file, 'w', encoding='utf8') as outfile:
                 yaml.dump(expected_output, outfile)
             loaded_output = load_yaml(tmp_yaml_file)
             self.assertDictEqual(loaded_output, expected_output)
@@ -59,6 +59,7 @@ class TestYamlLoading(unittest.TestCase):
 
 class TestCreateDirectoryTree(unittest.TestCase):
     """Tests for directory creation"""
+
     def test_error_if_exists(self):
         """Test if error is raised for already existent directory."""
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -224,7 +225,7 @@ class TestFeatureEngineering(MockDataTestCase):
         """Default X and y check for sklearn estimators"""
         try:
             sklearn.utils.check_X_y(self.X_train, self.y_train)
-        except:
+        except BaseException:
             self.fail('Xy test data does not pass sklearn default data check.')
             raise  # forward sklearn exception
 
@@ -232,7 +233,7 @@ class TestFeatureEngineering(MockDataTestCase):
         """Default X and y check for sklearn estimators"""
         try:
             sklearn.utils.check_X_y(self.X_test, self.y_test)
-        except:
+        except BaseException:
             self.fail('Xy test data does not pass sklearn default data check.')
             raise  # forward sklearn exception
 
@@ -424,7 +425,7 @@ class TestAUCPlots(MockDataTestCase):
         make_auc_plots(preds_and_trues={
             'clf_1_train': self.labels_trues_preds['clf_1_train']
         },
-                       output_file=output_file)
+            output_file=output_file)
         self.assertTrue(output_file.is_file())
 
     def test_plot_multiple_curves(self):
@@ -435,11 +436,15 @@ class TestAUCPlots(MockDataTestCase):
         self.assertTrue(output_file.is_file())
 
 
+# pylint:disable=import-outside-toplevel
 class TestLoadModelCls(unittest.TestCase):
     """Tests for class loading with importlib. It is important to add tests for
         each estimator before using it on yaml config to avoid errors. Each
-        test here 
+        test here. We disable pylint import-outside-toplevel because we are
+        directly testing modules can be imported, so it makes sense to isolate
+        these imports inside each test method.
     """
+
     def test_random_forest_classifier(self):
         """Test we can use RandomForesClassifier"""
         from sklearn.ensemble import RandomForestClassifier
@@ -543,19 +548,6 @@ class TestTrainModels(MockDataTestCase):
                         }
                     }
                 },
-                # 'dummy_classifier': {
-                #     'model_cls': 'sklearn.dummy.DummyClassifier',
-                #     'grid_params': {
-                #         'n_iter': 4,
-                #         'n_jobs': 1,
-                #         'param_distributions': {
-                #             'strategy': [
-                #                 'most_frequent', 'prior', 'stratified',
-                #                 'uniform'
-                #             ]
-                #         }
-                #     }
-                # },
                 'logistic_model': {
                     'model_cls': 'sklearn.linear_model.LogisticRegression',
                     'grid_params': {
@@ -580,14 +572,14 @@ class TestTrainModels(MockDataTestCase):
     def test_serialized_models_are_saved(self):
         """Test if serialized models are saved"""
         required_files = set(f'best_{model_name}.pkl'
-                             for model_name in self.config['models'].keys())
+                             for model_name in self.config['models'])
         actual_files = set(x.name for x in self.models_dir.iterdir())
         self.assertSetEqual(required_files, actual_files)
 
     def test_feature_importance_plots_are_saved(self):
         """Test if feature importance plots are saved"""
         required_files = set(f'{model_name}_feature_importances.png'
-                             for model_name in self.config['models'].keys())
+                             for model_name in self.config['models'])
         actual_files = set(x.name for x in self.results_dir.iterdir()
                            if x.name.endswith('_feature_importances.png'))
         self.assertSetEqual(required_files, required_files & actual_files)
@@ -605,110 +597,9 @@ class TestTrainModels(MockDataTestCase):
     def test_load_and_make_predictions_serialized_models(self):
         """Test if we can open the serialized models."""
         for model_name in self.config['models']:
-            try:
-                model = joblib.load(self.models_dir / f'best_{model_name}.pkl')
-                _ = model.predict_proba(self.X_train)
-            except:
-                self.fail(
-                    'Could not load and make predictions with serialized models'
-                )
-
-# class TestMain(unittest.TestCase):
-#     """Tests for main function. This class use a real data (yaml config and 
-#         csv file for tests.
-
-#         The main function uses basically all functions in churn_library.py,
-#         so although we already tested each function separately, we will have
-#         some redundant tests here to ensure tests cover the final use case.
-#     """
-#     @classmethod
-#     def setUpClass(cls):
-#         cls.config = {
-#             'output_dir': 'test_outputs',
-#             'data': {
-#                 'categorical_features': [
-#                     'Gender', 'Education_Level', 'Marital_Status',
-#                     'Income_Category', 'Card_Category'
-#                 ],
-#                 'csv_path':
-#                 './test_data/ok_data.csv',
-#                 'numeric_features': [
-#                     'Customer_Age', 'Dependent_count', 'Months_on_book',
-#                     'Total_Relationship_Count', 'Months_Inactive_12_mon',
-#                     'Contacts_Count_12_mon', 'Credit_Limit',
-#                     'Total_Revolving_Bal', 'Avg_Open_To_Buy',
-#                     'Total_Amt_Chng_Q4_Q1', 'Total_Trans_Amt',
-#                     'Total_Trans_Ct', 'Total_Ct_Chng_Q4_Q1',
-#                     'Avg_Utilization_Ratio'
-#                 ],
-#                 'target':
-#                 'Churn'
-#             },
-#             'models': {
-#                 'lrc': {
-#                     'grid_params': {
-#                         'n_jobs': [16]
-#                     }
-#                 },
-#                 'rfc': {
-#                     'grid_params': {
-#                         'criterion': ['gini', 'entropy'],
-#                         'max_depth': [4, 5, 100],
-#                         'max_features': ['auto', 'sqrt'],
-#                         'n_estimators': [200, 500],
-#                         'n_jobs': [16]
-#                     }
-#                 }
-#             },
-#             'random_seed': 42
-#         }
-#         cls.output_dir = Path(cls.config['output_dir'])
-#         cls.models_dir = Path(cls.output_dir / 'models')
-#         cls.results_dir = Path(cls.output_dir / 'results')
-#         cls.eda_dir = Path(cls.output_dir / 'images/eda')
-
-
-#     @classmethod
-#     def tearDownClass(cls):
-#         if cls.output_dir.is_dir():
-#             shutil.rmtree(cls.output_dir)
-    
-#     def test_directory_tree_correct(self):
-#         """Test if the directory tree is as expected"""
-#         required_dirs = {
-#             'images/eda/categorical_features',
-#             'images/eda/quantitative_features', 'images/eda/target',
-#             'images/eda', 'images', 'models', 'results', 'logs'
-#         }
-#         required_dirs = set(output_dir / Path(x) for x in required_dirs)
-#         actual_dirs = set(x for x in output_dir.rglob('*') if x.is_dir())
-#         self.assertSetEqual(required_dirs, actual_dirs)
-    
-#     def test_eda_categorical_features_plots_created(self):
-#         """Test if categorical columns EDA plots are created"""
-#         names_pat = ['mean_response_%s.png', 'univariate_distribution_%s.png']
-#         files_to_match = set(name % col for col in self.cat_columns
-#                              for name in names_pat)
-#         dir_to_test = self.eda_dir / 'images/eda/categorical_features'
-#         created_files = set(x.name for x in dir_to_test.iterdir())
-#         self.assertSetEqual(files_to_match, created_files)
-
-#     def test_eda_quant_features_plots_created(self):
-#         """Test if quantitative columns EDA plots are created"""
-#         names_pat = [
-#             'histogram_by_target_%s.png', 'univariate_histogram_%s.png'
-#         ]
-#         files_to_match = set(name % col for col in self.quant_columns
-#                              for name in names_pat)
-#         files_to_match.add('correlation_matrix_quant_columns.png')
-#         dir_to_test = self.output_dir / 'images/eda/quantitative_features'
-#         created_files = set(x.name for x in dir_to_test.iterdir())
-#         self.assertSetEqual(files_to_match, created_files)
-
-#     def test_eda_target_plot_created(self):
-#         """Test if target column EDA plots are created"""
-#         expected_files = {'target_distribution.png'}
-#         dir_to_test = self.output_dir / 'images/eda/target'
-#         actual_files = set(x.name for x in dir_to_test.iterdir())
-#         self.assertSetEqual(expected_files, actual_files)
-
+            model = joblib.load(self.models_dir / f'best_{model_name}.pkl')
+            # Check if model is fitted
+            self.assertIsNone(sklearn.utils.validation.check_is_fitted(model))
+            # Check predictions
+            preds = model.predict_proba(self.X_train)
+            self.assertIsInstance(preds, np.ndarray)

@@ -1,3 +1,4 @@
+name: uda_1
 channels:
   - defaults
 dependencies:
@@ -18,6 +19,7 @@ dependencies:
   - cffi=1.15.0=py38hd667e15_1
   - cloudpickle=2.0.0=pyhd3eb1b0_0
   - colorama=0.4.4=pyhd3eb1b0_0
+  - coverage=6.2=py38h7f8727e_0
   - cycler=0.11.0=pyhd3eb1b0_0
   - dbus=1.13.18=hb2f20db_0
   - debugpy=1.5.1=py38h295c915_0
@@ -150,4 +152,6 @@ dependencies:
   - zlib=1.2.11=h7f8727e_4
   - zstd=1.4.9=haebb681_0
   - pip:
+    - appdirs==1.4.4
     - pyyaml==6.0
+prefix: /home/marcospiau/miniconda3/envs/uda_1

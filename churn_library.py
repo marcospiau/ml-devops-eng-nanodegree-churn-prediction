@@ -5,13 +5,11 @@ Date: February 3, 2022
 """
 
 import argparse
-import copy
 import logging
 import shutil
 import tempfile
 from importlib import import_module
 from pathlib import Path
-from sys import excepthook
 from typing import Dict, List, Tuple
 
 import joblib
@@ -22,8 +20,6 @@ import seaborn as sns
 import sklearn
 import tabulate
 import yaml
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import RocCurveDisplay, classification_report
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.preprocessing import minmax_scale
@@ -43,10 +39,10 @@ def import_data(path: str) -> pd.DataFrame:
         AssertionError: if load data is empty
     """
     try:
-        df = pd.read_csv(path)
-        assert not df.empty
+        out = pd.read_csv(path)
+        assert not out.empty
         logging.info('SUCCESS: Loaded csv from %s', path)
-        return df
+        return out
     except FileNotFoundError as err:
         logging.error(err)
         raise
@@ -56,7 +52,15 @@ def import_data(path: str) -> pd.DataFrame:
 
 
 def load_yaml(path: str) -> Dict:
-    with open(path, 'r') as handler:
+    """Loads yaml file into dict.
+
+    Args:
+        path (str): input file path
+
+    Returns:
+        Dict: dict with contents from file
+    """
+    with open(path, 'r', encoding='utf8') as handler:
         return yaml.load(handler, Loader=yaml.FullLoader)
 
 
@@ -231,7 +235,6 @@ def perform_feature_engineering(
             - y_test: y testing data
     """
     # Continuous columns - normalize between 0 and 1
-    logging.info('Starting feature engineering')
     X_num = df[quant_columns].copy()
     X_num[X_num.columns] = minmax_scale(X_num)
     # Encode categorical columns
@@ -240,12 +243,8 @@ def perform_feature_engineering(
     X = pd.concat([X_num, X_cat], axis=1).astype(np.float32)
 
     y = df[response].astype(np.int64).copy()
-    X_train, X_test, y_train, y_test = train_test_split(X,
-                                                        y,
-                                                        test_size=0.3,
-                                                        random_state=42)
-    logging.info('Finishing feature engineering')
-    return X_train, X_test, y_train, y_test
+    # X_train, X_test, y_train, y_test
+    return train_test_split(X, y, test_size=0.3, random_state=42)
 
 
 def classification_report_image(labels_trues_preds: Dict[str, Tuple[np.array,
@@ -311,7 +310,7 @@ def feature_importance_plot(model: sklearn.base.BaseEstimator,
             intercept = model.intercept_.tolist()
             try:
                 assert len(intercept) == 1
-            except:
+            except BaseException:
                 logging.error('Intercept should be a single-element array')
                 raise
             feature_importances.insert(0, intercept[0])
@@ -412,7 +411,7 @@ def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
     # Run all grid searches and get best model trained
     logging.info('Starting grid searches')
     for model_name, model_config in config['models'].items():
-        logging.info(f'Started {model_name} grid search')
+        logging.info('Started %s grid search', model_name)
         model_classes[model_name] = load_model_cls(model_config['model_cls'])
         best_models[model_name] = run_grid_search(
             X=X_train,
@@ -429,9 +428,9 @@ def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
                                 output_pth=results_dir /
                                 f'{model_name}_feature_importances.png',
                                 feature_names=X_train.columns.tolist())
-        logging.info(f'Finished {model_name} grid search')
+        logging.info('Finished %s grid search', model_name)
 
-    logging.info(f'Finished grid searches')
+    logging.info('Finished grid searches')
 
     # Data used for metrics evaluation
     logging.info('Predicting scores for train and test')
@@ -445,60 +444,11 @@ def train_models(X_train: pd.DataFrame, X_test: pd.DataFrame,
     logging.info('Creating AUC plots')
     make_auc_plots(preds_and_trues, results_dir / 'auc_roc_curves.png')
 
-    ## classification reports
+    # classification reports
     logging.info('Creating classification reports')
     classification_report_image(labels_trues_preds=preds_and_trues,
                                 output_file=results_dir /
                                 'classification_report_image.png')
-
-
-def main(config):
-    """Function that encapsulates main process."""
-    logging.info('Starting script')
-
-    # Create directory tree
-    logging.info('Creating output directory tree')
-    output_dir = Path(config['output_dir'])
-    create_output_directory_tree(config['output_dir'])
-
-    df = import_data(config['data']['csv_path'])
-
-    # FIXME: make this configurable
-    df['Churn'] = np.where(df['Attrition_Flag'].eq('Attrited Customer'), 1, 0)
-
-    # Define column roles
-    cat_columns = config['data']['categorical_features']
-    quant_columns = config['data']['numeric_features']
-
-    cols_and_types = [(col, 'cat') for col in cat_columns]
-    cols_and_types += [(col, 'quant') for col in quant_columns]
-
-    logging.info(
-        'Features used:\n%s',
-        tabulate.tabulate(cols_and_types,
-                          headers=['Feature name', 'Feature type'],
-                          tablefmt='pretty'))
-
-    perform_eda(df=df,
-                cat_columns=cat_columns,
-                quant_columns=quant_columns,
-                response='Churn',
-                output_dir=output_dir / 'images' / 'eda')
-
-    # feature engineering
-    X_train, X_test, y_train, y_test = perform_feature_engineering(
-        df=df,
-        cat_columns=cat_columns,
-        quant_columns=quant_columns,
-        response='Churn')
-
-    # Model fitting
-    train_models(X_train=X_train,
-                 X_test=X_test,
-                 y_train=y_train,
-                 y_test=y_test,
-                 config=config)
-    logging.info('PROCESS END')
 
 
 if __name__ == '__main__':
@@ -515,14 +465,62 @@ if __name__ == '__main__':
         '%(asctime)s %(levelname)s - %(filename)s - %(funcName)s - %(message)s'
     )
     temp_log_file = tempfile.mktemp()
-    logging.basicConfig(
-        # filename=temp_log_file,
-        level=logging.INFO,
-        filemode='w',
-        format=LOGGING_FORMAT,
-        datefmt='%Y-%m-%d %H:%M:%S')
+    logging.basicConfig(filename=temp_log_file,
+                        level=logging.INFO,
+                        filemode='w',
+                        format=LOGGING_FORMAT,
+                        datefmt='%Y-%m-%d %H:%M:%S')
 
-    config = load_yaml(args.config)
-    main(config)
-    # shutil.copy(temp_log_file, './outputs/logs/results.log')
-    # Path(temp_log_file).unlink()
+    config_main = load_yaml(args.config)
+    """Function that encapsulates main process."""
+    logging.info('Starting script')
+
+    # Create directory tree
+    logging.info('Creating output directory tree')
+    create_output_directory_tree(config_main['output_dir'])
+
+    df_main = import_data(config_main['data']['csv_path'])
+
+    # TODO: make this configurable
+    df_main['Churn'] = np.where(
+        df_main['Attrition_Flag'].eq('Attrited Customer'), 1, 0)
+
+    cols_and_types = [(col, 'cat')
+                      for col in config_main['data']['categorical_features']]
+    cols_and_types += [(col, 'quant')
+                       for col in config_main['data']['numeric_features']]
+
+    logging.info(
+        'Features used:\n%s',
+        tabulate.tabulate(cols_and_types,
+                          headers=['Feature name', 'Feature type'],
+                          tablefmt='pretty'))
+
+    perform_eda(df=df_main,
+                cat_columns=config_main['data']['categorical_features'],
+                quant_columns=config_main['data']['numeric_features'],
+                response=config_main['data']['target'],
+                output_dir=Path(config_main['output_dir']) / 'images' / 'eda')
+
+    # feature engineering
+    logging.info('Starting feature engineering')
+    X_train_main, X_test_main, y_train_main, y_test_main = \
+        perform_feature_engineering(
+            df=df_main,
+            cat_columns=config_main['data']['categorical_features'],
+            quant_columns=config_main['data']['numeric_features'],
+            response=config_main['data']['target'])
+    logging.info('Finishing feature engineering')
+
+    # Model fitting
+    train_models(X_train=X_train_main,
+                 X_test=X_test_main,
+                 y_train=y_train_main,
+                 y_test=y_test_main,
+                 config=config_main)
+    logging.info('PROCESS END')
+
+    # Copy file to output dir
+    shutil.copy(temp_log_file,
+                Path(config_main['output_dir']) / 'logs/results.log')
+    Path(temp_log_file).unlink()

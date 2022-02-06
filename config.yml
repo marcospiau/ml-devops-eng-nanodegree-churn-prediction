@@ -1,12 +1,17 @@
+# Where to save outputs, cannot be a existing directory
 output_dir: outputs
+# data configs
 data:
+  # input csv location
   csv_path: ./data/bank_data.csv
+  # categorical features
   categorical_features:
     - Gender
     - Education_Level
     - Marital_Status
     - Income_Category
     - Card_Category
+  # numeric (or quantitative) features
   numeric_features:
     - Customer_Age
     - Dependent_count
@@ -22,16 +27,21 @@ data:
     - Total_Trans_Ct
     - Total_Ct_Chng_Q4_Q1
     - Avg_Utilization_Ratio
+  # target column
   target: Churn
 
-random_seed: 42
-
+# model and grid search configuration
+# outermost keys of this section are used to identify models on results ie: (
+# rfc, dtc, lrc)
 models:
   rfc:
+    # model class, will be used to instantiate model object
     model_cls: sklearn.ensemble.RandomForestClassifier
+    # kwargs to sklearn.model_selection.RandomizedSearchCV
     grid_params:
       n_iter: 5
       n_jobs: 1
+      # parameters used on grid search
       param_distributions:
         n_estimators:
           - 200
@@ -51,7 +61,7 @@ models:
   lrc:
     model_cls: sklearn.linear_model.LogisticRegression
     grid_params:
-      n_iter: 5
+      n_iter: 1
       n_jobs: 1
       param_distributions:
         n_jobs:
