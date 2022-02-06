@@ -1,7 +1,7 @@
 """
 Code for churn prediction modelling
 Owner: marcospiau
-Date: February 3, 2022
+Date: February 6, 2022
 """
 
 import argparse
